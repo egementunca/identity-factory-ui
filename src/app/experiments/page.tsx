@@ -1,0 +1,1032 @@
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
+import Navigation from '@/components/Navigation';
+import {
+  Play,
+  Settings,
+  Zap,
+  BarChart2,
+  Clock,
+  Activity,
+  CheckCircle,
+  XCircle,
+  Loader2,
+  Info,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
+import InfoTooltip from '@/components/InfoTooltip';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+interface ObfuscationParams {
+  structure_block_size_min: number;
+  structure_block_size_max: number;
+  shooting_count: number;
+  shooting_count_inner: number;
+  single_gate_replacements: number;
+  rounds: number;
+  sat_mode: boolean;
+  no_ancilla_mode: boolean;
+  single_gate_mode: boolean;
+  skip_compression: boolean;
+  compression_window_size: number;
+  compression_window_size_sat: number;
+  compression_sat_limit: number;
+  final_stability_threshold: number;
+  chunk_split_base: number;
+}
+
+interface ExperimentConfig {
+  name: string;
+  experiment_type: string;
+  description?: string;
+  wires: number;
+  initial_gates: number;
+  obfuscation: ObfuscationParams;
+  lmdb_path?: string;
+}
+
+interface ExperimentPreset {
+  id: string;
+  name: string;
+  description: string;
+  experiment_type: string;
+  config: ExperimentConfig;
+  tags: string[];
+}
+
+interface ExperimentProgress {
+  status: string;
+  progress_percent: number;
+  current_round?: number;
+  current_gates?: number;
+  elapsed_seconds: number;
+  new_lines?: string[];
+  final?: boolean;
+}
+
+interface ExperimentResults {
+  job_id: string;
+  status: string;
+  initial_gates: number;
+  final_gates: number;
+  expansion_factor: number;
+  elapsed_seconds: number;
+  heatmap_data?: number[][];
+  log_output?: string;
+}
+
+// Default values matching local_mixing/src/config.rs
+const defaultObfuscation: ObfuscationParams = {
+  structure_block_size_min: 10,
+  structure_block_size_max: 30,
+  shooting_count: 500000, // Rust default
+  shooting_count_inner: 0,
+  single_gate_replacements: 500,
+  rounds: 3, // Rust default
+  sat_mode: true,
+  no_ancilla_mode: false,
+  single_gate_mode: false,
+  skip_compression: false,
+  compression_window_size: 100,
+  compression_window_size_sat: 10,
+  compression_sat_limit: 1000,
+  final_stability_threshold: 12,
+  chunk_split_base: 1500,
+};
+
+// Parameter descriptions from source code analysis
+const paramDescriptions: Record<string, string> = {
+  wires: 'Number of qubits/wires in the circuit (3-64)',
+  initial_gates: 'Number of ECA57 gates in the starting circuit',
+  rounds:
+    'Butterfly obfuscation iterations. Each round: wrap in R·x·R⁻¹ → expand → compress',
+  shooting_count:
+    'Gate reordering at start. Randomly moves gates left/right as far as possible without collision, scrambling gate ordering',
+  shooting_count_inner:
+    'Gate reordering applied inside each butterfly block during obfuscation',
+  single_gate_replacements:
+    'Replace single gates with equivalent identity-templates from LMDB before main loop',
+  structure_block_size_min:
+    'Minimum size of random identity R·R⁻¹ structure wrapped around gates',
+  structure_block_size_max:
+    'Maximum size of random identity R·R⁻¹ structure wrapped around gates',
+  sat_mode:
+    'Use SAT solver to find optimal gate sequences during compression (more effective but slower than rainbow table)',
+  no_ancilla_mode:
+    'Disable ancilla expansion. When OFF: subcircuits expand to use extra wires to find equivalents via rainbow table lookup',
+  single_gate_mode:
+    'Enable single-gate replacement pass before main butterfly loop',
+  skip_compression:
+    'Skip all compression. Circuit only grows larger (inflation-only mode for testing)',
+  compression_window_size:
+    'Peephole window size for template-based compression. Scans window-sized subcircuits for replacements',
+  compression_window_size_sat:
+    'Smaller window size used when SAT mode is enabled',
+  compression_sat_limit:
+    'Conflict limit for SAT solver. Higher = more thorough search but slower',
+  final_stability_threshold:
+    'Stop final compression when N consecutive passes yield no improvement',
+  chunk_split_base:
+    'Split circuit into parallel chunks of this size for processing. Higher = bigger chunks',
+};
+
+export default function ExperimentsPage() {
+  const [presets, setPresets] = useState<ExperimentPreset[]>([]);
+  const [selectedPreset, setSelectedPreset] = useState<string>('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [config, setConfig] = useState<ExperimentConfig>({
+    name: 'My Experiment',
+    experiment_type: 'custom',
+    wires: 8,
+    initial_gates: 20,
+    obfuscation: { ...defaultObfuscation },
+  });
+
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [status, setStatus] = useState<string>('idle');
+  const [progress, setProgress] = useState<number>(0);
+  const [logLines, setLogLines] = useState<string[]>([]);
+  const [results, setResults] = useState<ExperimentResults | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const logRef = useRef<HTMLDivElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/v1/experiments/presets`)
+      .then((res) => res.json())
+      .then((data) => setPresets(data.presets || []))
+      .catch((err) => console.error('Failed to load presets:', err));
+  }, []);
+
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [logLines]);
+
+  const handlePresetChange = (presetId: string) => {
+    setSelectedPreset(presetId);
+    const preset = presets.find((p) => p.id === presetId);
+    if (preset) {
+      setConfig(preset.config);
+    }
+  };
+
+  const updateConfig = (field: string, value: any) => {
+    setConfig((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const updateObf = (field: string, value: any) => {
+    setConfig((prev) => ({
+      ...prev,
+      obfuscation: { ...prev.obfuscation, [field]: value },
+    }));
+  };
+
+  const startExperiment = async () => {
+    setError(null);
+    setLogLines([]);
+    setResults(null);
+    setProgress(0);
+    setStatus('starting');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/experiments/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to start experiment');
+      }
+
+      const data = await res.json();
+      setJobId(data.job_id);
+      setStatus('running');
+      connectToStream(data.job_id);
+    } catch (err: any) {
+      setError(err.message);
+      setStatus('error');
+    }
+  };
+
+  const connectToStream = (id: string) => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+
+    const es = new EventSource(`${API_BASE}/api/v1/experiments/${id}/stream`);
+    eventSourceRef.current = es;
+
+    es.onmessage = (event) => {
+      try {
+        const data: ExperimentProgress = JSON.parse(event.data);
+        setProgress(data.progress_percent);
+        setStatus(data.status);
+        if (data.new_lines) {
+          setLogLines((prev) => [...prev, ...data.new_lines!]);
+        }
+        if (data.final) {
+          es.close();
+          fetchResults(id);
+        }
+      } catch (err) {
+        console.error('Failed to parse SSE data:', err);
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      fetchResults(id);
+    };
+  };
+
+  const fetchResults = async (id: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/experiments/${id}/results`);
+      if (res.ok) {
+        const data = await res.json();
+        setResults(data);
+        setStatus(data.status);
+      }
+    } catch (err) {
+      console.error('Failed to fetch results:', err);
+    }
+  };
+
+  const cancelExperiment = async () => {
+    if (!jobId) return;
+    try {
+      await fetch(`${API_BASE}/api/v1/experiments/${jobId}`, {
+        method: 'DELETE',
+      });
+      eventSourceRef.current?.close();
+      setStatus('cancelled');
+    } catch (err) {
+      console.error('Failed to cancel:', err);
+    }
+  };
+
+  const isRunning =
+    status === 'running' || status === 'starting' || status === 'pending';
+
+  // Helper component for form fields with tooltips
+  const FormField = ({
+    label,
+    field,
+    children,
+  }: {
+    label: string;
+    field: string;
+    children: React.ReactNode;
+  }) => (
+    <div className="form-group">
+      <label>
+        {label}
+        <InfoTooltip content={paramDescriptions[field]} />
+      </label>
+      {children}
+    </div>
+  );
+
+  return (
+    <div className="page">
+      <Navigation />
+
+      <main className="page-content">
+        <header className="hero">
+          <h1>🧪 Experiment Runner</h1>
+          <p>
+            Configure and run local_mixing abbutterfly obfuscation experiments
+          </p>
+        </header>
+
+        <div className="layout">
+          {/* Configuration Panel */}
+          <section className="config-panel">
+            <h2>
+              <Settings size={18} /> Configuration
+            </h2>
+
+            {/* Preset Selector */}
+            <div className="form-group">
+              <label>Preset</label>
+              <select
+                value={selectedPreset}
+                onChange={(e) => handlePresetChange(e.target.value)}
+                disabled={isRunning}
+              >
+                <option value="">Custom Configuration</option>
+                {presets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              {selectedPreset &&
+                presets.find((p) => p.id === selectedPreset)?.description && (
+                  <p className="hint">
+                    {presets.find((p) => p.id === selectedPreset)?.description}
+                  </p>
+                )}
+            </div>
+
+            {/* Circuit Parameters */}
+            <div className="form-section">
+              <h3>Circuit Parameters</h3>
+              <FormField label="Experiment Name" field="name">
+                <input
+                  type="text"
+                  value={config.name}
+                  onChange={(e) => updateConfig('name', e.target.value)}
+                  disabled={isRunning}
+                />
+              </FormField>
+              <div className="form-row">
+                <FormField label="Wires" field="wires">
+                  <input
+                    type="number"
+                    min={3}
+                    max={64}
+                    value={config.wires}
+                    onChange={(e) =>
+                      updateConfig('wires', parseInt(e.target.value))
+                    }
+                    disabled={isRunning}
+                  />
+                </FormField>
+                <FormField label="Initial Gates" field="initial_gates">
+                  <input
+                    type="number"
+                    min={1}
+                    value={config.initial_gates}
+                    onChange={(e) =>
+                      updateConfig('initial_gates', parseInt(e.target.value))
+                    }
+                    disabled={isRunning}
+                  />
+                </FormField>
+              </div>
+            </div>
+
+            {/* Core Obfuscation */}
+            <div className="form-section">
+              <h3>Obfuscation Parameters</h3>
+              <div className="form-row">
+                <FormField label="Rounds" field="rounds">
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={config.obfuscation.rounds}
+                    onChange={(e) =>
+                      updateObf('rounds', parseInt(e.target.value))
+                    }
+                    disabled={isRunning}
+                  />
+                </FormField>
+                <FormField label="Shooting Count" field="shooting_count">
+                  <input
+                    type="number"
+                    min={0}
+                    value={config.obfuscation.shooting_count}
+                    onChange={(e) =>
+                      updateObf('shooting_count', parseInt(e.target.value))
+                    }
+                    disabled={isRunning}
+                  />
+                </FormField>
+              </div>
+              <div className="form-row">
+                <FormField
+                  label="Block Size Min"
+                  field="structure_block_size_min"
+                >
+                  <input
+                    type="number"
+                    min={3}
+                    value={config.obfuscation.structure_block_size_min}
+                    onChange={(e) =>
+                      updateObf(
+                        'structure_block_size_min',
+                        parseInt(e.target.value)
+                      )
+                    }
+                    disabled={isRunning}
+                  />
+                </FormField>
+                <FormField
+                  label="Block Size Max"
+                  field="structure_block_size_max"
+                >
+                  <input
+                    type="number"
+                    min={3}
+                    value={config.obfuscation.structure_block_size_max}
+                    onChange={(e) =>
+                      updateObf(
+                        'structure_block_size_max',
+                        parseInt(e.target.value)
+                      )
+                    }
+                    disabled={isRunning}
+                  />
+                </FormField>
+              </div>
+            </div>
+
+            {/* Modes */}
+            <div className="form-section">
+              <h3>Modes</h3>
+              <div className="toggles">
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={config.obfuscation.sat_mode}
+                    onChange={(e) => updateObf('sat_mode', e.target.checked)}
+                    disabled={isRunning}
+                  />
+                  <span>SAT Mode</span>
+                  <InfoTooltip content={paramDescriptions.sat_mode} />
+                </label>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={config.obfuscation.skip_compression}
+                    onChange={(e) =>
+                      updateObf('skip_compression', e.target.checked)
+                    }
+                    disabled={isRunning}
+                  />
+                  <span>Inflation Only</span>
+                  <InfoTooltip content={paramDescriptions.skip_compression} />
+                </label>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={config.obfuscation.no_ancilla_mode}
+                    onChange={(e) =>
+                      updateObf('no_ancilla_mode', e.target.checked)
+                    }
+                    disabled={isRunning}
+                  />
+                  <span>No Ancilla</span>
+                  <InfoTooltip content={paramDescriptions.no_ancilla_mode} />
+                </label>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={config.obfuscation.single_gate_mode}
+                    onChange={(e) =>
+                      updateObf('single_gate_mode', e.target.checked)
+                    }
+                    disabled={isRunning}
+                  />
+                  <span>Single Gate Mode</span>
+                  <InfoTooltip content={paramDescriptions.single_gate_mode} />
+                </label>
+              </div>
+            </div>
+
+            {/* Advanced Settings (collapsible) */}
+            <div className="form-section">
+              <button
+                className="advanced-toggle"
+                onClick={() => setShowAdvanced(!showAdvanced)}
+              >
+                {showAdvanced ? (
+                  <ChevronUp size={16} />
+                ) : (
+                  <ChevronDown size={16} />
+                )}
+                Advanced Settings
+              </button>
+
+              {showAdvanced && (
+                <div className="advanced-fields">
+                  <div className="form-row">
+                    <FormField
+                      label="Shooting Inner"
+                      field="shooting_count_inner"
+                    >
+                      <input
+                        type="number"
+                        min={0}
+                        value={config.obfuscation.shooting_count_inner}
+                        onChange={(e) =>
+                          updateObf(
+                            'shooting_count_inner',
+                            parseInt(e.target.value)
+                          )
+                        }
+                        disabled={isRunning}
+                      />
+                    </FormField>
+                    <FormField
+                      label="Single Gate Replacements"
+                      field="single_gate_replacements"
+                    >
+                      <input
+                        type="number"
+                        min={0}
+                        value={config.obfuscation.single_gate_replacements}
+                        onChange={(e) =>
+                          updateObf(
+                            'single_gate_replacements',
+                            parseInt(e.target.value)
+                          )
+                        }
+                        disabled={isRunning}
+                      />
+                    </FormField>
+                  </div>
+                  <div className="form-row">
+                    <FormField
+                      label="Compression Window"
+                      field="compression_window_size"
+                    >
+                      <input
+                        type="number"
+                        min={10}
+                        value={config.obfuscation.compression_window_size}
+                        onChange={(e) =>
+                          updateObf(
+                            'compression_window_size',
+                            parseInt(e.target.value)
+                          )
+                        }
+                        disabled={isRunning}
+                      />
+                    </FormField>
+                    <FormField
+                      label="SAT Window"
+                      field="compression_window_size_sat"
+                    >
+                      <input
+                        type="number"
+                        min={1}
+                        value={config.obfuscation.compression_window_size_sat}
+                        onChange={(e) =>
+                          updateObf(
+                            'compression_window_size_sat',
+                            parseInt(e.target.value)
+                          )
+                        }
+                        disabled={isRunning}
+                      />
+                    </FormField>
+                  </div>
+                  <div className="form-row">
+                    <FormField
+                      label="SAT Conflict Limit"
+                      field="compression_sat_limit"
+                    >
+                      <input
+                        type="number"
+                        min={100}
+                        value={config.obfuscation.compression_sat_limit}
+                        onChange={(e) =>
+                          updateObf(
+                            'compression_sat_limit',
+                            parseInt(e.target.value)
+                          )
+                        }
+                        disabled={isRunning}
+                      />
+                    </FormField>
+                    <FormField
+                      label="Stability Threshold"
+                      field="final_stability_threshold"
+                    >
+                      <input
+                        type="number"
+                        min={1}
+                        value={config.obfuscation.final_stability_threshold}
+                        onChange={(e) =>
+                          updateObf(
+                            'final_stability_threshold',
+                            parseInt(e.target.value)
+                          )
+                        }
+                        disabled={isRunning}
+                      />
+                    </FormField>
+                  </div>
+                  <div className="form-row">
+                    <FormField
+                      label="Chunk Split Base"
+                      field="chunk_split_base"
+                    >
+                      <input
+                        type="number"
+                        min={100}
+                        value={config.obfuscation.chunk_split_base}
+                        onChange={(e) =>
+                          updateObf(
+                            'chunk_split_base',
+                            parseInt(e.target.value)
+                          )
+                        }
+                        disabled={isRunning}
+                      />
+                    </FormField>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Run Button */}
+            <div className="actions">
+              {!isRunning ? (
+                <button className="btn-primary" onClick={startExperiment}>
+                  <Play size={18} /> Run Experiment
+                </button>
+              ) : (
+                <button className="btn-danger" onClick={cancelExperiment}>
+                  <XCircle size={18} /> Cancel
+                </button>
+              )}
+            </div>
+
+            {error && <div className="error">{error}</div>}
+          </section>
+
+          {/* Progress & Results Panel */}
+          <section className="results-panel">
+            <h2>
+              <Activity size={18} /> Progress & Results
+            </h2>
+
+            <div className="status-bar">
+              <div className="status-indicator">
+                {status === 'completed' && (
+                  <CheckCircle size={18} className="success" />
+                )}
+                {status === 'failed' && <XCircle size={18} className="error" />}
+                {isRunning && <Loader2 size={18} className="spinning" />}
+                {status === 'idle' && <Clock size={18} />}
+                <span>{status.toUpperCase()}</span>
+              </div>
+              {isRunning && (
+                <div className="progress-bar">
+                  <div
+                    className="progress-fill"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="log-container" ref={logRef}>
+              {logLines.length === 0 ? (
+                <div className="log-empty">
+                  Run an experiment to see output here...
+                </div>
+              ) : (
+                logLines.map((line, i) => (
+                  <div key={i} className="log-line">
+                    {line}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {results && (
+              <div className="results-summary">
+                <h3>
+                  <BarChart2 size={16} /> Results
+                </h3>
+                <div className="stats-grid">
+                  <div className="stat">
+                    <span className="stat-label">Initial</span>
+                    <span className="stat-value">{results.initial_gates}</span>
+                    <span className="stat-unit">gates</span>
+                  </div>
+                  <div className="stat">
+                    <span className="stat-label">Final</span>
+                    <span className="stat-value">{results.final_gates}</span>
+                    <span className="stat-unit">gates</span>
+                  </div>
+                  <div className="stat highlight">
+                    <span className="stat-label">Expansion</span>
+                    <span className="stat-value">
+                      {results.expansion_factor}x
+                    </span>
+                  </div>
+                  <div className="stat">
+                    <span className="stat-label">Time</span>
+                    <span className="stat-value">
+                      {results.elapsed_seconds.toFixed(1)}s
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+      </main>
+
+      <style jsx>{`
+        .page {
+          min-height: 100vh;
+          background: linear-gradient(180deg, #0a0a0f 0%, #12121a 100%);
+        }
+        .page-content {
+          max-width: 1400px;
+          margin: 0 auto;
+          padding: 24px;
+        }
+        .hero {
+          text-align: center;
+          padding: 32px 20px;
+          margin-bottom: 24px;
+        }
+        .hero h1 {
+          font-size: 2rem;
+          font-weight: 800;
+          margin-bottom: 8px;
+          background: linear-gradient(135deg, #fff, rgba(150, 200, 255, 0.9));
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        .hero p {
+          color: rgba(200, 200, 220, 0.6);
+        }
+        .layout {
+          display: grid;
+          grid-template-columns: 420px 1fr;
+          gap: 24px;
+        }
+        @media (max-width: 1000px) {
+          .layout {
+            grid-template-columns: 1fr;
+          }
+        }
+        .config-panel,
+        .results-panel {
+          background: rgba(20, 20, 30, 0.8);
+          border: 1px solid rgba(100, 100, 150, 0.2);
+          border-radius: 16px;
+          padding: 24px;
+        }
+        .config-panel h2,
+        .results-panel h2 {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 1.1rem;
+          font-weight: 600;
+          color: rgba(200, 200, 220, 0.9);
+          margin-bottom: 20px;
+          padding-bottom: 12px;
+          border-bottom: 1px solid rgba(100, 100, 150, 0.2);
+        }
+        .form-section {
+          margin-bottom: 20px;
+        }
+        .form-section h3 {
+          font-size: 0.85rem;
+          font-weight: 600;
+          color: rgba(200, 200, 220, 0.7);
+          margin-bottom: 12px;
+        }
+        .form-group {
+          margin-bottom: 12px;
+        }
+        .form-group label {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 0.8rem;
+          font-weight: 500;
+          color: rgba(200, 200, 220, 0.8);
+          margin-bottom: 6px;
+        }
+
+        .form-group input,
+        .form-group select {
+          width: 100%;
+          padding: 10px 12px;
+          background: rgba(30, 30, 45, 0.8);
+          border: 1px solid rgba(100, 100, 150, 0.3);
+          border-radius: 8px;
+          color: #fff;
+          font-size: 0.9rem;
+        }
+        .form-group input:focus,
+        .form-group select:focus {
+          outline: none;
+          border-color: rgba(100, 150, 255, 0.5);
+        }
+        .form-group input:disabled,
+        .form-group select:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        .hint {
+          font-size: 0.7rem;
+          color: rgba(200, 200, 220, 0.4);
+          margin-top: 4px;
+        }
+        .form-row {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 12px;
+        }
+        .toggles {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .toggle {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          cursor: pointer;
+          font-size: 0.85rem;
+          color: rgba(200, 200, 220, 0.9);
+        }
+        .toggle input {
+          width: 18px;
+          height: 18px;
+        }
+        .advanced-toggle {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: none;
+          border: none;
+          color: rgba(150, 200, 255, 0.8);
+          font-size: 0.85rem;
+          cursor: pointer;
+          padding: 8px 0;
+        }
+        .advanced-toggle:hover {
+          color: rgba(150, 200, 255, 1);
+        }
+        .advanced-fields {
+          margin-top: 12px;
+          padding: 12px;
+          background: rgba(30, 30, 45, 0.5);
+          border-radius: 8px;
+        }
+        .actions {
+          margin-top: 24px;
+        }
+        .btn-primary,
+        .btn-danger {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          width: 100%;
+          padding: 14px 20px;
+          border: none;
+          border-radius: 10px;
+          font-size: 1rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+        .btn-primary {
+          background: linear-gradient(135deg, #4a7dff, #6a5acd);
+          color: #fff;
+        }
+        .btn-primary:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 20px rgba(100, 150, 255, 0.3);
+        }
+        .btn-danger {
+          background: linear-gradient(135deg, #ff4a4a, #cd5a5a);
+          color: #fff;
+        }
+        .error {
+          margin-top: 16px;
+          padding: 12px;
+          background: rgba(255, 100, 100, 0.1);
+          border: 1px solid rgba(255, 100, 100, 0.3);
+          border-radius: 8px;
+          color: #ff6b6b;
+          font-size: 0.85rem;
+        }
+        .status-bar {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          margin-bottom: 16px;
+        }
+        .status-indicator {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 0.85rem;
+          font-weight: 600;
+          color: rgba(200, 200, 220, 0.8);
+        }
+        .status-indicator .success {
+          color: #4ade80;
+        }
+        .status-indicator .error {
+          color: #f87171;
+        }
+        .spinning {
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(360deg);
+          }
+        }
+        .progress-bar {
+          flex: 1;
+          height: 8px;
+          background: rgba(30, 30, 45, 0.8);
+          border-radius: 4px;
+          overflow: hidden;
+        }
+        .progress-fill {
+          height: 100%;
+          background: linear-gradient(90deg, #4a7dff, #4ade80);
+          border-radius: 4px;
+          transition: width 0.3s;
+        }
+        .log-container {
+          height: 300px;
+          overflow-y: auto;
+          background: rgba(10, 10, 15, 0.8);
+          border: 1px solid rgba(100, 100, 150, 0.2);
+          border-radius: 8px;
+          padding: 12px;
+          font-family: 'SF Mono', 'Fira Code', monospace;
+          font-size: 0.75rem;
+        }
+        .log-empty {
+          color: rgba(200, 200, 220, 0.3);
+          text-align: center;
+          padding: 40px;
+        }
+        .log-line {
+          color: rgba(200, 200, 220, 0.8);
+          line-height: 1.6;
+          white-space: pre-wrap;
+          word-break: break-all;
+        }
+        .results-summary {
+          margin-top: 20px;
+          padding: 16px;
+          background: rgba(30, 30, 45, 0.6);
+          border-radius: 12px;
+        }
+        .results-summary h3 {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 0.9rem;
+          font-weight: 600;
+          color: rgba(200, 200, 220, 0.9);
+          margin-bottom: 16px;
+        }
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 12px;
+        }
+        .stat {
+          text-align: center;
+          padding: 12px;
+          background: rgba(20, 20, 30, 0.6);
+          border-radius: 8px;
+        }
+        .stat.highlight {
+          background: rgba(100, 150, 255, 0.15);
+          border: 1px solid rgba(100, 150, 255, 0.3);
+        }
+        .stat-label {
+          display: block;
+          font-size: 0.7rem;
+          color: rgba(200, 200, 220, 0.5);
+          margin-bottom: 4px;
+        }
+        .stat-value {
+          font-size: 1.25rem;
+          font-weight: 700;
+          color: #fff;
+        }
+        .stat-unit {
+          display: block;
+          font-size: 0.65rem;
+          color: rgba(200, 200, 220, 0.4);
+        }
+      `}</style>
+    </div>
+  );
+}

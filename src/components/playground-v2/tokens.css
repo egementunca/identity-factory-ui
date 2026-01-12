@@ -1,0 +1,104 @@
+/* ECA57 Playground Pro - Design Tokens */
+
+:root {
+  /* Base colors - Monochromatic */
+  --bg-primary: #0d0d12;
+  --bg-secondary: #13131a;
+  --bg-tertiary: #1a1a24;
+  --bg-elevated: #1f1f2a;
+
+  /* Border */
+  --border-subtle: #2a2a3a;
+  --border-default: #363646;
+  --border-strong: #4a4a5a;
+
+  /* Text */
+  --text-muted: #6b6b7b;
+  --text-secondary: #9a9aaa;
+  --text-primary: #d0d0da;
+  --text-emphasis: #ffffff;
+
+  /* Accent - Single indigo */
+  --accent-primary: #6366f1;
+  --accent-hover: #818cf8;
+  --accent-muted: #6366f120;
+
+  /* Status colors */
+  --status-success: #22c55e;
+  --status-warning: #eab308;
+  --status-error: #ef4444;
+  --status-identity: #10b981;
+
+  /* Gate colors - Subtle */
+  --gate-eca57: #22c55e;
+  --gate-eca57-bg: #22c55e15;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+
+  /* Sizing */
+  --sidebar-width: 200px;
+  --sidebar-collapsed: 48px;
+  --right-panel-width: 320px;
+  --tab-height: 36px;
+  --status-bar-height: 28px;
+
+  /* Typography */
+  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+
+  /* Transitions */
+  --transition-fast: 100ms ease;
+  --transition-default: 150ms ease;
+}
+
+/* Utility classes */
+.panel-header {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.btn-tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-tool:hover {
+  color: var(--text-emphasis);
+  background: var(--bg-elevated);
+  border-color: var(--border-subtle);
+}
+
+.btn-tool.active {
+  color: var(--accent-primary);
+  background: var(--accent-muted);
+  border-color: var(--accent-primary);
+}
+
+.divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: var(--space-sm) 0;
+}
