@@ -191,7 +191,7 @@ export default function Dashboard() {
         }
 
         .hero p {
-          color: rgba(200, 200, 220, 0.6);
+          color: rgba(200, 200, 220, 0.9);
           font-size: 1.1rem;
         }
 
@@ -202,7 +202,7 @@ export default function Dashboard() {
         .section h2 {
           font-size: 1.1rem;
           font-weight: 600;
-          color: rgba(200, 200, 220, 0.9);
+          color: #fff;
           margin-bottom: 16px;
         }
 
@@ -245,7 +245,7 @@ export default function Dashboard() {
 
         .link-content p {
           font-size: 0.85rem;
-          color: rgba(200, 200, 220, 0.6);
+          color: rgba(200, 200, 220, 0.8);
         }
 
         .link-arrow {
@@ -268,7 +268,7 @@ export default function Dashboard() {
 
         .dim-label {
           font-size: 0.8rem;
-          color: rgba(200, 200, 220, 0.6);
+          color: rgba(200, 200, 220, 0.8);
           margin-bottom: 8px;
         }
 
@@ -280,7 +280,7 @@ export default function Dashboard() {
 
         .dim-sublabel {
           font-size: 0.7rem;
-          color: rgba(200, 200, 220, 0.4);
+          color: rgba(200, 200, 220, 0.6);
         }
 
         .dim-card.more {
@@ -321,7 +321,7 @@ export default function Dashboard() {
 
         .source-card p {
           font-size: 0.75rem;
-          color: rgba(200, 200, 220, 0.5);
+          color: rgba(200, 200, 220, 0.7);
           font-family: 'SF Mono', monospace;
         }
 

@@ -65,7 +65,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   padding: var(--space-sm) var(--space-md);
   border-bottom: 1px solid var(--border-subtle);
 }

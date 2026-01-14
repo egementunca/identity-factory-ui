@@ -21,6 +21,8 @@ import InfoTooltip from '@/components/InfoTooltip';
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 interface ObfuscationParams {
+  strategy: 'abbutterfly' | 'bbutterfly' | 'butterfly';
+  bookendless: boolean;
   structure_block_size_min: number;
   structure_block_size_max: number;
   shooting_count: number;
@@ -80,6 +82,8 @@ interface ExperimentResults {
 
 // Default values matching local_mixing/src/config.rs
 const defaultObfuscation: ObfuscationParams = {
+  strategy: 'abbutterfly',
+  bookendless: false,
   structure_block_size_min: 10,
   structure_block_size_max: 30,
   shooting_count: 500000, // Rust default
@@ -99,6 +103,10 @@ const defaultObfuscation: ObfuscationParams = {
 
 // Parameter descriptions from source code analysis
 const paramDescriptions: Record<string, string> = {
+  strategy:
+    'Obfuscation Strategy: abbutterfly (Asymmetric Big), bbutterfly (Symmetric Big), or butterfly (Standard)',
+  bookendless:
+    'Enable bookendless mode for abbutterfly. Skips initial/final structure padding',
   wires: 'Number of qubits/wires in the circuit (3-64)',
   initial_gates: 'Number of ECA57 gates in the starting circuit',
   rounds:
@@ -300,13 +308,6 @@ export default function ExperimentsPage() {
       <Navigation />
 
       <main className="page-content">
-        <header className="hero">
-          <h1>🧪 Experiment Runner</h1>
-          <p>
-            Configure and run local_mixing abbutterfly obfuscation experiments
-          </p>
-        </header>
-
         <div className="layout">
           {/* Configuration Panel */}
           <section className="config-panel">
@@ -375,10 +376,21 @@ export default function ExperimentsPage() {
               </div>
             </div>
 
-            {/* Core Obfuscation */}
+            {/* Strategy & Mode */}
             <div className="form-section">
-              <h3>Obfuscation Parameters</h3>
+              <h3>Strategy</h3>
               <div className="form-row">
+                <FormField label="Strategy" field="strategy">
+                  <select
+                    value={config.obfuscation.strategy}
+                    onChange={(e) => updateObf('strategy', e.target.value)}
+                    disabled={isRunning}
+                  >
+                    <option value="abbutterfly">Abbutterfly (Asymmetric)</option>
+                    <option value="bbutterfly">Bbutterfly (Symmetric)</option>
+                    <option value="butterfly">Butterfly (Standard)</option>
+                  </select>
+                </FormField>
                 <FormField label="Rounds" field="rounds">
                   <input
                     type="number"
@@ -391,6 +403,29 @@ export default function ExperimentsPage() {
                     disabled={isRunning}
                   />
                 </FormField>
+              </div>
+              <div className="toggles">
+                {config.obfuscation.strategy === 'abbutterfly' && (
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={config.obfuscation.bookendless}
+                      onChange={(e) =>
+                        updateObf('bookendless', e.target.checked)
+                      }
+                      disabled={isRunning}
+                    />
+                    <span>Bookendless</span>
+                    <InfoTooltip content={paramDescriptions.bookendless} />
+                  </label>
+                )}
+              </div>
+            </div>
+
+            {/* Intensity */}
+            <div className="form-section">
+              <h3>Intensity</h3>
+              <div className="form-row">
                 <FormField label="Shooting Count" field="shooting_count">
                   <input
                     type="number"
@@ -402,7 +437,29 @@ export default function ExperimentsPage() {
                     disabled={isRunning}
                   />
                 </FormField>
+                <FormField
+                  label="Single Gates"
+                  field="single_gate_replacements"
+                >
+                  <input
+                    type="number"
+                    min={0}
+                    value={config.obfuscation.single_gate_replacements}
+                    onChange={(e) =>
+                      updateObf(
+                        'single_gate_replacements',
+                        parseInt(e.target.value)
+                      )
+                    }
+                    disabled={isRunning}
+                  />
+                </FormField>
               </div>
+            </div>
+
+            {/* Structure */}
+            <div className="form-section">
+              <h3>Structure</h3>
               <div className="form-row">
                 <FormField
                   label="Block Size Min"
@@ -441,9 +498,9 @@ export default function ExperimentsPage() {
               </div>
             </div>
 
-            {/* Modes */}
+            {/* Optimization & Flags */}
             <div className="form-section">
-              <h3>Modes</h3>
+              <h3>Optimization</h3>
               <div className="toggles">
                 <label className="toggle">
                   <input
@@ -509,7 +566,7 @@ export default function ExperimentsPage() {
               </button>
 
               {showAdvanced && (
-                <div className="advanced-fields">
+                  <div className="advanced-fields">
                   <div className="form-row">
                     <FormField
                       label="Shooting Inner"
@@ -522,23 +579,6 @@ export default function ExperimentsPage() {
                         onChange={(e) =>
                           updateObf(
                             'shooting_count_inner',
-                            parseInt(e.target.value)
-                          )
-                        }
-                        disabled={isRunning}
-                      />
-                    </FormField>
-                    <FormField
-                      label="Single Gate Replacements"
-                      field="single_gate_replacements"
-                    >
-                      <input
-                        type="number"
-                        min={0}
-                        value={config.obfuscation.single_gate_replacements}
-                        onChange={(e) =>
-                          updateObf(
-                            'single_gate_replacements',
                             parseInt(e.target.value)
                           )
                         }
@@ -782,7 +822,7 @@ export default function ExperimentsPage() {
           gap: 8px;
           font-size: 1.1rem;
           font-weight: 600;
-          color: rgba(200, 200, 220, 0.9);
+          color: #ffffff;
           margin-bottom: 20px;
           padding-bottom: 12px;
           border-bottom: 1px solid rgba(100, 100, 150, 0.2);
@@ -793,7 +833,7 @@ export default function ExperimentsPage() {
         .form-section h3 {
           font-size: 0.85rem;
           font-weight: 600;
-          color: rgba(200, 200, 220, 0.7);
+          color: rgba(200, 200, 220, 0.9);
           margin-bottom: 12px;
         }
         .form-group {
@@ -805,7 +845,7 @@ export default function ExperimentsPage() {
           gap: 6px;
           font-size: 0.8rem;
           font-weight: 500;
-          color: rgba(200, 200, 220, 0.8);
+          color: rgba(240, 240, 250, 1);
           margin-bottom: 6px;
         }
 
@@ -831,7 +871,7 @@ export default function ExperimentsPage() {
         }
         .hint {
           font-size: 0.7rem;
-          color: rgba(200, 200, 220, 0.4);
+          color: rgba(200, 200, 220, 0.6);
           margin-top: 4px;
         }
         .form-row {
@@ -1013,7 +1053,7 @@ export default function ExperimentsPage() {
         .stat-label {
           display: block;
           font-size: 0.7rem;
-          color: rgba(200, 200, 220, 0.5);
+          color: rgba(200, 200, 220, 0.7);
           margin-bottom: 4px;
         }
         .stat-value {
@@ -1024,7 +1064,7 @@ export default function ExperimentsPage() {
         .stat-unit {
           display: block;
           font-size: 0.65rem;
-          color: rgba(200, 200, 220, 0.4);
+          color: rgba(200, 200, 220, 0.6);
         }
       `}</style>
     </div>

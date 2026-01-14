@@ -46,10 +46,10 @@ const navItems: NavItem[] = [
     description: 'Explore All Circuits',
   },
   {
-    label: 'Playground',
-    href: '/playground',
+    label: 'Playground Pro',
+    href: '/playground-v2',
     icon: <Puzzle size={20} />,
-    description: 'Interactive Builder',
+    description: 'Advanced Circuit Builder',
   },
   {
     label: 'ECA57 Explorer',
@@ -80,7 +80,8 @@ export default function Navigation() {
           <Link
             key={item.href}
             href={item.href}
-            className={`nav-link ${pathname === item.href ? 'active' : ''}`}
+            className={`nav-link text-white ${pathname === item.href ? 'active' : ''}`}
+            style={{ color: '#ffffff', opacity: 1 }}
           >
             {item.icon}
             <span className="nav-label">{item.label}</span>
@@ -135,7 +136,7 @@ export default function Navigation() {
           gap: 8px;
           padding: 10px 16px;
           border-radius: 10px;
-          color: rgba(200, 200, 220, 0.7);
+          color: #ffffff;
           text-decoration: none;
           font-size: 0.9rem;
           font-weight: 500;
