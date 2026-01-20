@@ -18,20 +18,6 @@ interface SATStats {
   status: string;
 }
 
-interface GoDatabase {
-  file_name: string;
-  n_wires: number;
-  n_gates: number;
-  file_size_bytes: number;
-}
-
-interface GoStats {
-  databases: GoDatabase[];
-  total_databases: number;
-  total_permutations?: number;
-  total_circuits?: number;
-}
-
 interface ClusterStats {
   total_circuits: number;
   by_dimension: Record<string, number>;
@@ -59,6 +45,34 @@ interface Circuit {
   gate_count: number;
   diagram?: string;
   order_val?: number;
+  gate_counts?: number[]; // For Permutation DB
+}
+
+interface PermTableStats {
+  name: string;
+  entries: number;
+  key_size: number;
+  n_wires: number;
+}
+
+interface PermEntry {
+  permutation: number[];
+  gate_counts: number[];
+  hex_key: string;
+}
+
+interface PermDatabaseStats {
+  tables: PermTableStats[];
+  total_entries: number;
+  path: string;
+  status: string;
+}
+
+interface PermEntriesResponse {
+  entries: PermEntry[];
+  limit: number;
+  offset: number;
+  has_more: boolean;
 }
 
 interface CircuitListResponse {
@@ -77,13 +91,6 @@ export default function DualDatabaseView() {
   const [satCircuits, setSatCircuits] = useState<Circuit[]>([]);
   const [satExpanded, setSatExpanded] = useState(false);
 
-  // Go Database state
-  const [goStats, setGoStats] = useState<GoStats | null>(null);
-  const [goLoading, setGoLoading] = useState(true);
-  const [expandedGoDb, setExpandedGoDb] = useState<string | null>(null);
-  const [goCircuits, setGoCircuits] = useState<Circuit[]>([]);
-  const [goCircuitsLoading, setGoCircuitsLoading] = useState(false);
-
   // Cluster Database state
   const [clusterStats, setClusterStats] = useState<ClusterStats | null>(null);
   const [clusterLoading, setClusterLoading] = useState(true);
@@ -92,6 +99,44 @@ export default function DualDatabaseView() {
 
   // Selected circuit for details
   const [selectedCircuit, setSelectedCircuit] = useState<Circuit | null>(null);
+
+  // Permutation Database state
+  const [permStats, setPermStats] = useState<PermDatabaseStats | null>(null);
+  const [permLoading, setPermLoading] = useState(true);
+  const [permEntries, setPermEntries] = useState<PermEntry[]>([]);
+  const [selectedPermTable, setSelectedPermTable] = useState<string | null>(null);
+  const [permExpanded, setPermExpanded] = useState(false);
+
+  // Fetch Perm stats
+  const fetchPermStats = async () => {
+    setPermLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/perm-database/stats`);
+      if (res.ok) {
+        setPermStats(await res.json());
+      }
+    } catch (e) {
+      console.error('Failed to fetch Perm stats:', e);
+    } finally {
+      setPermLoading(false);
+    }
+  };
+
+  // Fetch Perm entries
+  const fetchPermEntries = async (table: string, limit = 50, offset = 0) => {
+    try {
+      const res = await fetch(
+        `${API_BASE}/perm-database/${table}/entries?limit=${limit}&offset=${offset}`
+      );
+      if (res.ok) {
+        const data: PermEntriesResponse = await res.json();
+        setPermEntries(data.entries);
+      }
+    } catch (e) {
+      console.error('Failed to fetch Perm entries:', e);
+    }
+  };
+
 
   // Fetch SAT stats
   const fetchSatStats = async () => {
@@ -121,39 +166,6 @@ export default function DualDatabaseView() {
       }
     } catch (e) {
       console.error('Failed to fetch SAT circuits:', e);
-    }
-  };
-
-  // Fetch Go stats
-  const fetchGoStats = async () => {
-    setGoLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/go-database/stats`);
-      if (res.ok) {
-        setGoStats(await res.json());
-      }
-    } catch (e) {
-      console.error('Failed to fetch Go stats:', e);
-    } finally {
-      setGoLoading(false);
-    }
-  };
-
-  // Fetch Go circuits for a specific database
-  const fetchGoCircuits = async (fileName: string) => {
-    setGoCircuitsLoading(true);
-    try {
-      const res = await fetch(
-        `${API_BASE}/go-database/${fileName}/circuits?limit=20`
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setGoCircuits(data.circuits || []);
-      }
-    } catch (e) {
-      console.error('Failed to fetch Go circuits:', e);
-    } finally {
-      setGoCircuitsLoading(false);
     }
   };
 
@@ -189,8 +201,8 @@ export default function DualDatabaseView() {
 
   useEffect(() => {
     fetchSatStats();
-    fetchGoStats();
     fetchClusterStats();
+    fetchPermStats();
   }, []);
 
   const formatBytes = (bytes: number) => {
@@ -299,107 +311,6 @@ export default function DualDatabaseView() {
           )}
         </div>
 
-        {/* Go Database Panel */}
-        <div className="database-panel go-panel">
-          <div className="panel-header">
-            <div className="panel-title">
-              <Zap className="icon" />
-              <h3>Go Brute-Force Database</h3>
-              <span className="status-badge complete">
-                {goStats?.total_databases || 0} files
-              </span>
-            </div>
-            <button onClick={fetchGoStats} className="refresh-btn">
-              <RefreshCw className="icon-sm" />
-            </button>
-          </div>
-
-          {goLoading ? (
-            <div className="loading-state">Loading...</div>
-          ) : goStats && goStats.databases?.length > 0 ? (
-            <>
-              <div className="stats-row">
-                <div className="stat">
-                  <span className="stat-value">
-                    {goStats.total_circuits ||
-                      goStats.total_permutations ||
-                      '?'}
-                  </span>
-                  <span className="stat-label">Total Circuits</span>
-                </div>
-                <div className="stat">
-                  <span className="stat-value">
-                    {goStats.databases[0]?.n_wires || '?'}w
-                  </span>
-                  <span className="stat-label">Wire Count</span>
-                </div>
-              </div>
-
-              <div className="db-file-list">
-                {goStats.databases.map((db) => (
-                  <div key={db.file_name} className="db-file">
-                    <button
-                      className="db-file-header"
-                      onClick={() => {
-                        if (expandedGoDb === db.file_name) {
-                          setExpandedGoDb(null);
-                        } else {
-                          setExpandedGoDb(db.file_name);
-                          fetchGoCircuits(db.file_name);
-                        }
-                      }}
-                    >
-                      {expandedGoDb === db.file_name ? (
-                        <ChevronDown />
-                      ) : (
-                        <ChevronRight />
-                      )}
-                      <span className="db-name">{db.file_name}</span>
-                      <span className="db-meta">
-                        {db.n_wires}w × {db.n_gates}g
-                      </span>
-                      <span className="db-size">
-                        {formatBytes(db.file_size_bytes)}
-                      </span>
-                    </button>
-
-                    {expandedGoDb === db.file_name && (
-                      <div className="circuits-list">
-                        {goCircuitsLoading ? (
-                          <div className="loading-state">
-                            Loading circuits...
-                          </div>
-                        ) : goCircuits.length > 0 ? (
-                          goCircuits.map((circuit, i) => (
-                            <div
-                              key={circuit.perm_key || i}
-                              className={`circuit-item ${selectedCircuit?.perm_key === circuit.perm_key ? 'selected' : ''}`}
-                              onClick={() => setSelectedCircuit(circuit)}
-                            >
-                              <div className="circuit-info">
-                                <span className="circuit-dim">
-                                  {circuit.gate_count}g
-                                </span>
-                                <span className="circuit-cycle">
-                                  {formatCycle(circuit.perm_cycle)}
-                                </span>
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="empty-state">No circuits found</div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="empty-state">No Go databases found.</div>
-          )}
-        </div>
-
         {/* Cluster Database Panel */}
         <div className="database-panel cluster-panel">
           <div className="panel-header">
@@ -478,6 +389,105 @@ export default function DualDatabaseView() {
             </div>
           )}
         </div>
+
+        {/* Permutation Database Panel */}
+        <div className="database-panel perm-panel">
+          <div className="panel-header">
+            <div className="panel-title">
+              <Database className="icon" />
+              <h3>Permutation Tables (LMDB)</h3>
+              <span className={`status-badge ${permStats?.status === 'active' ? 'complete' : 'unknown'}`}>
+                {permStats?.status === 'active' ? 'Ready' : 'Not Found'}
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                fetchPermStats();
+                if (selectedPermTable) fetchPermEntries(selectedPermTable);
+              }}
+              className="refresh-btn"
+            >
+              <RefreshCw className="icon-sm" />
+            </button>
+          </div>
+
+          {permLoading ? (
+            <div className="loading-state">Loading...</div>
+          ) : permStats && permStats.total_entries > 0 ? (
+            <>
+              <div className="stats-row">
+                <div className="stat">
+                  <span className="stat-value">
+                    {permStats.total_entries.toLocaleString()}
+                  </span>
+                  <span className="stat-label">Total Permutations</span>
+                </div>
+                <div className="stat">
+                  <span className="stat-value">
+                    {permStats.tables.length}
+                  </span>
+                  <span className="stat-label">Tables</span>
+                </div>
+              </div>
+
+              <div className="db-file-list">
+                {permStats.tables.map((table) => (
+                  <div 
+                    key={table.name} 
+                    className={`db-file-header ${selectedPermTable === table.name ? 'selected' : ''}`}
+                    onClick={() => {
+                      if (selectedPermTable === table.name) {
+                        setSelectedPermTable(null);
+                        setPermEntries([]);
+                      } else {
+                        setSelectedPermTable(table.name);
+                        fetchPermEntries(table.name);
+                      }
+                    }}
+                  >
+                    <span className="db-name">{table.name}</span>
+                    <span className="db-meta">{table.n_wires} wires</span>
+                    <span className="db-size">{table.entries.toLocaleString()} entries</span>
+                  </div>
+                ))}
+              </div>
+
+              {selectedPermTable && (
+                <div className="circuits-list">
+                   <h4 style={{color: '#aaa', fontSize: '0.8rem', margin: '10px 0 5px 0'}}>First 50 Entries of {selectedPermTable}</h4>
+                   {permEntries.length === 0 && <div className="loading-state">Loading entries...</div>}
+                   {permEntries.map((entry, i) => (
+                     <div
+                       key={i}
+                       className="circuit-item"
+                       onClick={() => setSelectedCircuit({
+                         permutation: entry.permutation,
+                         gate_counts: entry.gate_counts,
+                         gates: [], // No gates stored, just counts
+                         gate_count: 0,
+                         perm_cycle: [], // Ideally calculate cycle here or backend
+                         id: i
+                       })}
+                     >
+                       <div className="circuit-info">
+                         <span className="circuit-dim">
+                           Permutation: {entry.permutation.slice(0, 5).join(',')}...
+                         </span>
+                         <span className="circuit-cycle">
+                           Counts: {entry.gate_counts.join(', ')}
+                         </span>
+                       </div>
+                     </div>
+                   ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="empty-state">
+              No Permutation database found at {permStats?.path}.
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Circuit Details Panel */}
@@ -510,6 +520,12 @@ export default function DualDatabaseView() {
                 <span>{selectedCircuit.order_val}</span>
               </div>
             )}
+            {selectedCircuit.gate_counts && (
+              <div className="detail-item">
+                 <label>Stored Gate Counts</label>
+                 <code>{JSON.stringify(selectedCircuit.gate_counts)}</code>
+              </div>
+            )}
           </div>
 
           {selectedCircuit.diagram && (
@@ -520,9 +536,9 @@ export default function DualDatabaseView() {
           )}
 
           <div className="gates-list">
-            <label>Gates ({selectedCircuit.gates.length})</label>
+            <label>Gates ({selectedCircuit.gates?.length || 0})</label>
             <div className="gates-grid">
-              {selectedCircuit.gates.map((gate, i) => {
+              {selectedCircuit.gates?.map((gate, i) => {
                 // SAT format: [controls[], target] - e.g. [[1], 0] means CX with ctrl=1, target=0
                 // Go format: {active, ctrl1, ctrl2}
                 let gateStr = '';
@@ -600,6 +616,9 @@ export default function DualDatabaseView() {
         }
         .cluster-panel {
           border-color: rgba(150, 255, 150, 0.3);
+        }
+        .perm-panel {
+          border-color: rgba(220, 100, 255, 0.3);
         }
 
         .panel-header {

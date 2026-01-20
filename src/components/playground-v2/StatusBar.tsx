@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { AlertTriangle } from 'lucide-react';
 
 interface StatusBarProps {
   width: number;
@@ -9,6 +10,9 @@ interface StatusBarProps {
   selectedCount: number;
   clipboardCount: number;
   cycleNotation: string;
+  // Performance flags
+  isTooManyWires?: boolean;
+  isTooManyGates?: boolean;
 }
 
 export default function StatusBar({
@@ -18,7 +22,11 @@ export default function StatusBar({
   selectedCount,
   clipboardCount,
   cycleNotation,
+  isTooManyWires = false,
+  isTooManyGates = false,
 }: StatusBarProps) {
+  const hasPerformanceWarning = isTooManyWires || isTooManyGates;
+  
   return (
     <div
       className="flex items-center justify-between px-3 h-7 text-xs border-t select-none"
@@ -51,6 +59,18 @@ export default function StatusBar({
             <span>📋 {clipboardCount}g</span>
           </>
         )}
+        {hasPerformanceWarning && (
+          <>
+            <span className="text-[var(--border-default)]">│</span>
+            <span 
+              className="flex items-center gap-1 text-amber-400"
+              title={`Performance mode: ${isTooManyWires ? 'Permutation skipped (>16w)' : ''} ${isTooManyGates ? 'Skeleton disabled (>200g)' : ''}`}
+            >
+              <AlertTriangle className="w-3 h-3" />
+              Perf
+            </span>
+          </>
+        )}
       </div>
 
       {/* Right section - cycle notation */}
@@ -65,3 +85,4 @@ export default function StatusBar({
     </div>
   );
 }
+

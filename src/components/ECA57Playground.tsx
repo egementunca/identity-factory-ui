@@ -6,8 +6,11 @@ import { HTML5Backend } from 'react-dnd-html5-backend';
 import GateToolbox from './GateToolbox';
 import CircuitCanvas from './CircuitCanvas';
 import SkeletonGraph from './SkeletonGraph';
+import IdentityBrowser from './IdentityBrowser';
 import { PlaygroundCircuit, PlaygroundGate, LiveMetrics } from '@/types/api';
-import { Plus, Minus, ArrowRightLeft } from 'lucide-react';
+import { Plus, Minus, ArrowRightLeft, FolderOpen, Zap } from 'lucide-react';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 
 // Check if two gates collide (can't swap)
 // Gates collide iff one's target is in the other's controls
@@ -110,6 +113,10 @@ export default function ECA57Playground() {
     sourceWidth: number;
     reducedWidth: number;
   } | null>(null);
+
+  // Identity browser state
+  const [showIdentityBrowser, setShowIdentityBrowser] = useState(false);
+  const [isLoadingIdentity, setIsLoadingIdentity] = useState(false);
 
   // Calculate live permutation and cycle notation
   const { permutation, isIdentity, cycleNotation } = useMemo(() => {
@@ -733,6 +740,103 @@ export default function ECA57Playground() {
     [circuit.gates]
   );
 
+  // Parse .gate format (e.g., "012;123;234;") into PlaygroundGates
+  const parseGateString = useCallback((gateStr: string): { gates: PlaygroundGate[], detectedWidth: number } => {
+    const gateTokens = gateStr.split(';').filter(s => s.trim());
+    const gates: PlaygroundGate[] = [];
+    
+    // Character to wire index mapping - must match Rust's wire_to_char exactly
+    const charToWire = (c: string): number => {
+      const code = c.charCodeAt(0);
+      // 0-9 -> wires 0-9
+      if (code >= 48 && code <= 57) return code - 48;
+      // a-z -> wires 10-35
+      if (code >= 97 && code <= 122) return code - 97 + 10;
+      // A-Z -> wires 36-61
+      if (code >= 65 && code <= 90) return code - 65 + 36;
+      // Special characters for wires 62+
+      const specialChars: Record<string, number> = {
+        '!': 62, '@': 63, '#': 64, '$': 65, '%': 66,
+        '^': 67, '&': 68, '*': 69, '(': 70, ')': 71,
+        '-': 72, '_': 73, '=': 74, '+': 75, '[': 76,
+        ']': 77, '{': 78, '}': 79, '<': 80, '>': 81, '?': 82
+      };
+      return specialChars[c] ?? 0;
+    };
+
+    // First pass: detect max wire index used
+    let maxWire = 0;
+    gateTokens.forEach((token) => {
+      if (token.length >= 3) {
+        maxWire = Math.max(maxWire, charToWire(token[0]), charToWire(token[1]), charToWire(token[2]));
+      }
+    });
+    const detectedWidth = maxWire + 1; // Width is max wire index + 1
+
+    // Second pass: create gates
+    gateTokens.forEach((token, idx) => {
+      if (token.length >= 3) {
+        const target = charToWire(token[0]);
+        const ctrl1 = charToWire(token[1]);
+        const ctrl2 = charToWire(token[2]);
+        
+        gates.push({
+          id: `loaded-${Date.now()}-${idx}`,
+          type: 'ECA57',
+          step: idx,
+          target,
+          controls: [ctrl1, ctrl2],
+        });
+      }
+    });
+    
+    return { gates, detectedWidth };
+  }, []);
+
+  // Load circuit from string (used by IdentityBrowser)
+  const handleLoadCircuit = useCallback((circuitStr: string, wiresHint: number) => {
+    const { gates, detectedWidth } = parseGateString(circuitStr);
+    // Use detected width if it's larger than the hint, or if hint is small default
+    const finalWidth = Math.max(detectedWidth, wiresHint, MIN_WIDTH);
+    setCircuit({
+      width: finalWidth,
+      length: Math.max(gates.length + 2, INITIAL_LENGTH),
+      gates,
+    });
+  }, [parseGateString]);
+
+  // Load latest identity from API
+  const handleLoadLatestIdentity = useCallback(async () => {
+    setIsLoadingIdentity(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/local-mixing/identities/latest`);
+      if (!res.ok) {
+        // Fallback to listing and getting first
+        const listRes = await fetch(`${API_BASE}/api/v1/local-mixing/identities/saved`);
+        if (!listRes.ok) throw new Error('No identities available');
+        const listData = await listRes.json();
+        if (!listData.identities || listData.identities.length === 0) {
+          alert('No identity circuits found. Generate some using grow-identity first.');
+          return;
+        }
+        // Load the first one
+        const first = listData.identities[0];
+        const fileRes = await fetch(`${API_BASE}/api/v1/local-mixing/identities/saved/${first.filename}`);
+        if (!fileRes.ok) throw new Error('Failed to load identity');
+        const fileData = await fileRes.json();
+        handleLoadCircuit(fileData.circuit_str, fileData.wires || 8);
+        return;
+      }
+      const data = await res.json();
+      handleLoadCircuit(data.circuit_str, data.wires || 8);
+    } catch (err) {
+      console.error('Failed to load latest identity:', err);
+      alert('Failed to load identity. Check if API is running.');
+    } finally {
+      setIsLoadingIdentity(false);
+    }
+  }, [handleLoadCircuit]);
+
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="h-full w-full flex bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 overflow-hidden">
@@ -783,6 +887,29 @@ export default function ECA57Playground() {
                 title="One gate per line, all lines targeted"
               >
                 All Lines
+              </button>
+            </div>
+          </div>
+
+          {/* Load Identity buttons */}
+          <div className="bg-slate-700/40 p-3 rounded-lg mb-4">
+            <div className="text-sm text-slate-300 mb-2">Load Identity</div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleLoadLatestIdentity}
+                disabled={isLoadingIdentity}
+                className="flex-1 px-3 py-2 bg-amber-600/80 hover:bg-amber-500 disabled:bg-slate-600 text-white rounded-lg text-sm flex items-center justify-center gap-1"
+                title="Load the most recently created identity circuit"
+              >
+                <Zap className="w-4 h-4" />
+                {isLoadingIdentity ? '...' : 'Latest'}
+              </button>
+              <button
+                onClick={() => setShowIdentityBrowser(true)}
+                className="flex-1 px-3 py-2 bg-slate-600/80 hover:bg-slate-500 text-white rounded-lg text-sm flex items-center justify-center gap-1"
+              >
+                <FolderOpen className="w-4 h-4" />
+                Browse
               </button>
             </div>
           </div>
@@ -1013,6 +1140,13 @@ export default function ECA57Playground() {
           </div>
         </div>
       </div>
+
+      {/* Identity Browser Modal */}
+      <IdentityBrowser
+        isOpen={showIdentityBrowser}
+        onClose={() => setShowIdentityBrowser(false)}
+        onLoadCircuit={handleLoadCircuit}
+      />
     </DndProvider>
   );
 }

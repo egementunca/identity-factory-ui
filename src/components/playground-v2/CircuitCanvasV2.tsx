@@ -24,6 +24,7 @@ interface CircuitCanvasV2Props {
   onGateRemove: (gateId: string) => void;
   onControlEdit: (gateId: string, newControls: number[]) => void;
   selectedTool: 'X' | 'CX' | 'CCX' | 'ECA57' | null;
+  interactionMode: 'select' | 'add';
   zoom: number;
   // New: 3-click mode preview
   pendingPlacement?: { step: number; target?: number; ctrl1?: number } | null;
@@ -224,6 +225,7 @@ function DropCell({
   gate,
   cellHeight,
   selectedTool,
+  interactionMode,
   onDrop,
   onControlDrop,
   onClick,
@@ -240,6 +242,7 @@ function DropCell({
   gate: PlaygroundGate | null;
   cellHeight: number;
   selectedTool: 'X' | 'CX' | 'CCX' | 'ECA57' | null;
+  interactionMode: 'select' | 'add';
   onDrop: (
     item: DragItem & { selectedIds?: string[]; anchorStep?: number },
     step: number,
@@ -360,7 +363,7 @@ function DropCell({
       )}
 
       {/* Hover hint for empty cell */}
-      {!gate && selectedTool && (
+      {!gate && selectedTool && interactionMode === 'add' && (
         <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-50 pointer-events-none">
           <div className="w-6 h-6 rounded border border-[var(--text-muted)] text-[var(--text-muted)] flex items-center justify-center text-xs">
             +
@@ -378,6 +381,7 @@ export default function CircuitCanvasV2({
   onGateRemove,
   onControlEdit,
   selectedTool,
+  interactionMode,
   zoom,
   pendingPlacement,
   selectedGateIds = new Set(),
@@ -439,6 +443,9 @@ export default function CircuitCanvasV2({
 
   const handleCellClick = useCallback(
     (step: number, qubit: number) => {
+      // In select mode, clicking empty cell might clear selection (handled by container click possibly, but let's ensure we don't drop).
+      if (interactionMode === 'select') return;
+
       if (!selectedTool) return;
       const gate = gateGrid[qubit]?.[step];
       if (!gate) {
@@ -502,8 +509,22 @@ export default function CircuitCanvasV2({
     );
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (e: React.MouseEvent) => {
     if (!isMarqueeSelecting || !marquee || !onSelectionChange) {
+      setMarquee(null);
+      setIsMarqueeSelecting(false);
+      return;
+    }
+
+    // Calculate drag distance
+    const dist = Math.sqrt(
+      Math.pow(marquee.endX - marquee.startX, 2) +
+      Math.pow(marquee.endY - marquee.startY, 2)
+    );
+
+    // If drag is very small, treat as click -> Deselect All
+    if (dist < 5) {
+      onSelectionChange(new Set());
       setMarquee(null);
       setIsMarqueeSelecting(false);
       return;
@@ -541,7 +562,7 @@ export default function CircuitCanvasV2({
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
+      onMouseLeave={(e) => handleMouseUp(e as any)}
     >
       <div
         style={{
@@ -600,6 +621,7 @@ export default function CircuitCanvasV2({
                   gate={isGateTarget ? gate : null}
                   cellHeight={cellHeight}
                   selectedTool={selectedTool}
+                  interactionMode={interactionMode}
                   onDrop={handleDrop}
                   onControlDrop={handleControlDrag}
                   onClick={() => handleCellClick(step, qubit)}

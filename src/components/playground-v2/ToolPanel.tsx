@@ -17,6 +17,8 @@ import {
   RotateCw,
   FlipHorizontal,
   Dices,
+  Zap,
+  FolderOpen,
 } from 'lucide-react';
 
 interface ToolPanelProps {
@@ -31,9 +33,15 @@ interface ToolPanelProps {
   onRandom: () => void;
   onReorder: () => void;
   onClear: () => void;
+  // Identity loading
+  onLoadLatest?: () => void;
+  onBrowseIdentities?: () => void;
+  isLoadingIdentity?: boolean;
   // Placement mode
   placementMode: 'auto' | 'manual';
   onSetPlacementMode: (mode: 'auto' | 'manual') => void;
+  interactionMode: 'select' | 'add';
+  onSetInteractionMode: (mode: 'select' | 'add') => void;
   pendingPlacement: { step: number; target?: number; ctrl1?: number } | null;
   onCancelPending: () => void;
   // Clipboard
@@ -50,6 +58,10 @@ interface ToolPanelProps {
   onRotateRight?: () => void;
   onReverse?: () => void;
   onRandomPermute?: () => void;
+  // Skeleton
+  onGenerateSkeleton?: (gates: number, chain?: number) => void;
+  skeletonGeneratonStatus?: 'idle' | 'generating' | 'success' | 'error';
+  skeletonGenerationError?: string;
 }
 
 function ToolButton({
@@ -98,8 +110,13 @@ export default function ToolPanel({
   onRandom,
   onReorder,
   onClear,
+  onLoadLatest,
+  onBrowseIdentities,
+  isLoadingIdentity = false,
   placementMode,
   onSetPlacementMode,
+  interactionMode,
+  onSetInteractionMode,
   pendingPlacement,
   onCancelPending,
   selectedCount,
@@ -115,6 +132,9 @@ export default function ToolPanel({
   onRotateRight,
   onReverse,
   onRandomPermute,
+  onGenerateSkeleton,
+  skeletonGeneratonStatus = 'idle',
+  skeletonGenerationError,
 }: ToolPanelProps) {
   return (
     <div
@@ -175,6 +195,8 @@ export default function ToolPanel({
 
         {!isCollapsed && <div className="h-px bg-[var(--border-subtle)]" />}
 
+        {!isCollapsed && <div className="h-px bg-[var(--border-subtle)]" />}
+
         {/* Generate Section */}
         <div>
           {!isCollapsed && (
@@ -183,6 +205,65 @@ export default function ToolPanel({
             </div>
           )}
           <div className="space-y-1">
+             {/* Skeleton Generator */}
+             {onGenerateSkeleton && !isCollapsed && (
+               <div className="p-3 mb-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] space-y-3 shadow-sm">
+                 <div className="flex items-center justify-between">
+                    <div className="text-[11px] font-semibold text-[var(--text-secondary)]">Skeleton Chain</div>
+                    {skeletonGeneratonStatus === 'success' && <div className="text-[9px] text-green-400">Success</div>}
+                 </div>
+                 
+                 <div className="space-y-2">
+                    <div className="flex flex-col gap-1">
+                        <label htmlFor="skel-gates" className="text-[10px] text-[var(--text-muted)]">Target Gates</label>
+                        <input
+                            type="number"
+                            className="w-full px-2 py-1.5 text-[11px] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded focus:border-[var(--accent-primary)] focus:outline-none transition-colors"
+                            defaultValue={10}
+                            min={2}
+                            max={200}
+                            id="skel-gates"
+                        />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                         <label htmlFor="skel-chain" className="text-[10px] text-[var(--text-muted)]">Chain Length <span className="text-[var(--text-faint)]">(Optional)</span></label>
+                        <input
+                            type="number"
+                            className="w-full px-2 py-1.5 text-[11px] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded focus:border-[var(--accent-primary)] focus:outline-none transition-colors"
+                            placeholder="Full chain"
+                            min={2}
+                            id="skel-chain"
+                        />
+                    </div>
+                 </div>
+
+                 {skeletonGeneratonStatus === 'error' && skeletonGenerationError && (
+                    <div className="text-[10px] text-red-400 leading-tight">
+                        {skeletonGenerationError}
+                    </div>
+                 )}
+
+                 <button 
+                    className={`w-full py-1.5 text-[10px] font-medium rounded transition-all duration-200
+                        ${skeletonGeneratonStatus === 'generating' 
+                            ? 'bg-[var(--bg-elevated)] text-[var(--text-muted)] cursor-wait' 
+                            : 'bg-[var(--accent-primary)] text-white hover:opacity-90 hover:shadow-md'
+                        }
+                    `}
+                    disabled={skeletonGeneratonStatus === 'generating'}
+                    onClick={() => {
+                        const gatesStr = (document.getElementById('skel-gates') as HTMLInputElement).value;
+                        const chainStr = (document.getElementById('skel-chain') as HTMLInputElement).value;
+                        const gates = parseInt(gatesStr) || 10;
+                        const chain = chainStr ? parseInt(chainStr) : undefined;
+                        onGenerateSkeleton(gates, chain);
+                    }}
+                 >
+                    {skeletonGeneratonStatus === 'generating' ? 'Generating...' : 'Generate Circuit'}
+                 </button>
+               </div>
+             )}
+
             <ToolButton
               icon={Shuffle}
               label="Random"
@@ -206,11 +287,74 @@ export default function ToolPanel({
 
         {!isCollapsed && <div className="h-px bg-[var(--border-subtle)]" />}
 
-        {/* Placement Mode */}
+        {/* Load Identity Section */}
+        {onLoadLatest && (
+          <div>
+            {!isCollapsed && (
+              <div className="text-[10px] uppercase tracking-wider text-[var(--status-identity)] mb-1.5 px-1">
+                Load Identity
+              </div>
+            )}
+            <div className="space-y-1">
+              <ToolButton
+                icon={Zap}
+                label={isLoadingIdentity ? 'Loading...' : 'Latest'}
+                onClick={onLoadLatest}
+                disabled={isLoadingIdentity}
+                collapsed={isCollapsed}
+              />
+              {onBrowseIdentities && (
+                <ToolButton
+                  icon={FolderOpen}
+                  label="Browse"
+                  onClick={onBrowseIdentities}
+                  collapsed={isCollapsed}
+                />
+              )}
+            </div>
+          </div>
+        )}
+
+        {!isCollapsed && <div className="h-px bg-[var(--border-subtle)]" />}
+
+        {/* Interaction Mode */}
         {!isCollapsed && (
           <div>
+            <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5 px-1">
+              Mode
+            </div>
+            <div className="flex gap-1 mb-2">
+              <button
+                onClick={() => onSetInteractionMode('select')}
+                className={`flex-1 flex items-center justify-center gap-1 px-2 py-1 text-[10px] rounded transition-all ${
+                  interactionMode === 'select'
+                    ? 'bg-[var(--accent-muted)] text-[var(--accent-primary)] border border-[var(--accent-primary)]'
+                    : 'text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--border-default)]'
+                }`}
+                title="Selection Mode"
+              >
+                <MousePointer2 className="w-3 h-3" /> Select
+              </button>
+              <button
+                onClick={() => onSetInteractionMode('add')}
+                className={`flex-1 flex items-center justify-center gap-1 px-2 py-1 text-[10px] rounded transition-all ${
+                  interactionMode === 'add'
+                    ? 'bg-[var(--accent-muted)] text-[var(--accent-primary)] border border-[var(--accent-primary)]'
+                    : 'text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--border-default)]'
+                }`}
+                title="Gate Addition Mode"
+              >
+                <Plus className="w-3 h-3" /> Add
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Placement Mode (only when Adding) */}
+        {!isCollapsed && interactionMode === 'add' && (
+          <div>
             <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5 px-1 flex items-center justify-between">
-              <span>Mode</span>
+              <span>Placement</span>
               <span className="text-[9px] opacity-60">[M]</span>
             </div>
             <div className="flex gap-1">

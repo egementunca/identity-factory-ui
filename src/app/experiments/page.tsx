@@ -17,68 +17,20 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import InfoTooltip from '@/components/InfoTooltip';
+import HeatmapViewer from '@/components/experiments/HeatmapViewer';
+import AlignmentViewer from '@/components/experiments/AlignmentViewer';
+import ExperimentHistory from '@/components/experiments/ExperimentHistory';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-interface ObfuscationParams {
-  strategy: 'abbutterfly' | 'bbutterfly' | 'butterfly';
-  bookendless: boolean;
-  structure_block_size_min: number;
-  structure_block_size_max: number;
-  shooting_count: number;
-  shooting_count_inner: number;
-  single_gate_replacements: number;
-  rounds: number;
-  sat_mode: boolean;
-  no_ancilla_mode: boolean;
-  single_gate_mode: boolean;
-  skip_compression: boolean;
-  compression_window_size: number;
-  compression_window_size_sat: number;
-  compression_sat_limit: number;
-  final_stability_threshold: number;
-  chunk_split_base: number;
-}
-
-interface ExperimentConfig {
-  name: string;
-  experiment_type: string;
-  description?: string;
-  wires: number;
-  initial_gates: number;
-  obfuscation: ObfuscationParams;
-  lmdb_path?: string;
-}
-
-interface ExperimentPreset {
-  id: string;
-  name: string;
-  description: string;
-  experiment_type: string;
-  config: ExperimentConfig;
-  tags: string[];
-}
-
-interface ExperimentProgress {
-  status: string;
-  progress_percent: number;
-  current_round?: number;
-  current_gates?: number;
-  elapsed_seconds: number;
-  new_lines?: string[];
-  final?: boolean;
-}
-
-interface ExperimentResults {
-  job_id: string;
-  status: string;
-  initial_gates: number;
-  final_gates: number;
-  expansion_factor: number;
-  elapsed_seconds: number;
-  heatmap_data?: number[][];
-  log_output?: string;
-}
+import {
+  ObfuscationParams,
+  ExperimentConfig,
+  ExperimentPreset,
+  ExperimentProgress,
+  AlignmentMatrix,
+  ExperimentResults,
+} from '@/types/experiments';
 
 // Default values matching local_mixing/src/config.rs
 const defaultObfuscation: ObfuscationParams = {
@@ -86,7 +38,7 @@ const defaultObfuscation: ObfuscationParams = {
   bookendless: false,
   structure_block_size_min: 10,
   structure_block_size_max: 30,
-  shooting_count: 500000, // Rust default
+  shooting_count: 10000, // Practical default for most circuits
   shooting_count_inner: 0,
   single_gate_replacements: 500,
   rounds: 3, // Rust default
@@ -94,6 +46,7 @@ const defaultObfuscation: ObfuscationParams = {
   no_ancilla_mode: false,
   single_gate_mode: false,
   skip_compression: false,
+  pair_replacement_mode: true,
   compression_window_size: 100,
   compression_window_size_sat: 10,
   compression_sat_limit: 1000,
@@ -129,6 +82,8 @@ const paramDescriptions: Record<string, string> = {
     'Enable single-gate replacement pass before main butterfly loop',
   skip_compression:
     'Skip all compression. Circuit only grows larger (inflation-only mode for testing)',
+  pair_replacement_mode:
+    'Enable pair replacement: replaces pairs of gates with single equivalent templates from LMDB to reduce gate count',
   compression_window_size:
     'Peephole window size for template-based compression. Scans window-sized subcircuits for replacements',
   compression_window_size_sat:
@@ -139,7 +94,27 @@ const paramDescriptions: Record<string, string> = {
     'Stop final compression when N consecutive passes yield no improvement',
   chunk_split_base:
     'Split circuit into parallel chunks of this size for processing. Higher = bigger chunks',
+  name: 'A descriptive name for this experiment run',
 };
+
+// Helper component for form fields with tooltips - MUST be outside main component to prevent focus loss
+const FormField = ({
+  label,
+  field,
+  children,
+}: {
+  label: string;
+  field: string;
+  children: React.ReactNode;
+}) => (
+  <div className="form-group">
+    <label>
+      {label}
+      <InfoTooltip content={paramDescriptions[field]} />
+    </label>
+    {children}
+  </div>
+);
 
 export default function ExperimentsPage() {
   const [presets, setPresets] = useState<ExperimentPreset[]>([]);
@@ -195,6 +170,20 @@ export default function ExperimentsPage() {
     }));
   };
 
+  const handleLoadConfig = (newConfig: ExperimentConfig) => {
+    setConfig(newConfig);
+    setSelectedPreset('');
+  };
+
+  const handleSelectExperiment = (loadedResults: ExperimentResults) => {
+    setResults(loadedResults);
+    if (loadedResults.config) {
+      setConfig(loadedResults.config);
+    }
+  };
+
+
+
   const startExperiment = async () => {
     setError(null);
     setLogLines([]);
@@ -211,7 +200,23 @@ export default function ExperimentsPage() {
 
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.detail || 'Failed to start experiment');
+        let errorMessage = 'Failed to start experiment';
+        
+        if (err.detail) {
+            if (typeof err.detail === 'string') {
+                errorMessage = err.detail;
+            } else if (Array.isArray(err.detail)) {
+                // Parse Pydantic validation errors
+                errorMessage = err.detail.map((e: any) => {
+                    // loc like ['body', 'config', 'wires'] -> 'config.wires'
+                    const field = e.loc.slice(1).join('.'); 
+                    return `${field}: ${e.msg}`;
+                }).join('\n');
+            } else {
+                errorMessage = JSON.stringify(err.detail);
+            }
+        }
+        throw new Error(errorMessage);
       }
 
       const data = await res.json();
@@ -219,6 +224,7 @@ export default function ExperimentsPage() {
       setStatus('running');
       connectToStream(data.job_id);
     } catch (err: any) {
+      console.error("Experiment start error:", err);
       setError(err.message);
       setStatus('error');
     }
@@ -283,25 +289,61 @@ export default function ExperimentsPage() {
 
   const isRunning =
     status === 'running' || status === 'starting' || status === 'pending';
+  const maxRenderableCells = 1_000_000;
 
-  // Helper component for form fields with tooltips
-  const FormField = ({
-    label,
-    field,
-    children,
-  }: {
-    label: string;
-    field: string;
-    children: React.ReactNode;
-  }) => (
-    <div className="form-group">
-      <label>
-        {label}
-        <InfoTooltip content={paramDescriptions[field]} />
-      </label>
-      {children}
-    </div>
+  const heatmapCellCount =
+    results?.heatmap_data?.length && results.heatmap_data[0]?.length
+      ? results.heatmap_data.length * results.heatmap_data[0].length
+      : 0;
+  const heatmapTooLarge = heatmapCellCount > maxRenderableCells;
+  const canRenderHeatmap = Boolean(
+    results?.heatmap_data &&
+      results.heatmap_x_size &&
+      results.heatmap_y_size &&
+      !heatmapTooLarge
   );
+
+  const alignmentDims = (() => {
+    if (!results?.alignment_matrix) return null;
+    if (Array.isArray(results.alignment_matrix)) {
+      const rows = results.alignment_matrix.length;
+      const cols = results.alignment_matrix[0]?.length ?? 0;
+      return { rows, cols };
+    }
+    if (
+      Array.isArray(results.alignment_matrix.dim) &&
+      results.alignment_matrix.dim.length === 2
+    ) {
+      return {
+        rows: results.alignment_matrix.dim[0],
+        cols: results.alignment_matrix.dim[1],
+      };
+    }
+    return null;
+  })();
+  const alignmentCellCount = alignmentDims
+    ? alignmentDims.rows * alignmentDims.cols
+    : 0;
+  const alignmentTooLarge = alignmentCellCount > maxRenderableCells;
+  const wiresForAlignment = results?.config?.wires ?? config.wires;
+  const alignmentBlocked = wiresForAlignment > 64;
+  const canRenderAlignment = Boolean(
+    results?.alignment_matrix && !alignmentTooLarge && !alignmentBlocked
+  );
+  const heatmapMessage = !results?.heatmap_data
+    ? 'Heatmap not available for this run.'
+    : !results.heatmap_x_size || !results.heatmap_y_size
+      ? 'Heatmap dimensions missing from results.'
+      : heatmapTooLarge
+        ? 'Heatmap too large to render in the browser.'
+        : '';
+  const alignmentMessage = !results?.alignment_matrix
+    ? 'Alignment not available for this run.'
+    : alignmentBlocked
+      ? 'Alignment only supports 64 wires or fewer.'
+      : alignmentTooLarge
+        ? 'Alignment matrix too large to render in the browser.'
+        : '';
 
   return (
     <div className="page">
@@ -309,7 +351,14 @@ export default function ExperimentsPage() {
 
       <main className="page-content">
         <div className="layout">
-          {/* Configuration Panel */}
+          <aside className="history-sidebar">
+            <ExperimentHistory
+              onSelectExperiment={handleSelectExperiment}
+              onLoadConfig={handleLoadConfig}
+              currentJobId={jobId}
+            />
+          </aside>
+
           <section className="config-panel">
             <h2>
               <Settings size={18} /> Configuration
@@ -436,6 +485,9 @@ export default function ExperimentsPage() {
                     }
                     disabled={isRunning}
                   />
+                  <span className="hint">
+                    Recommended: 1k (fast), 10k (standard), 100k (thorough)
+                  </span>
                 </FormField>
                 <FormField
                   label="Single Gates"
@@ -547,6 +599,18 @@ export default function ExperimentsPage() {
                   />
                   <span>Single Gate Mode</span>
                   <InfoTooltip content={paramDescriptions.single_gate_mode} />
+                </label>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={config.obfuscation.pair_replacement_mode}
+                    onChange={(e) =>
+                      updateObf('pair_replacement_mode', e.target.checked)
+                    }
+                    disabled={isRunning}
+                  />
+                  <span>Pair Replacement</span>
+                  <InfoTooltip content={paramDescriptions.pair_replacement_mode} />
                 </label>
               </div>
             </div>
@@ -766,6 +830,34 @@ export default function ExperimentsPage() {
                     </span>
                   </div>
                 </div>
+                <div className="results-visuals">
+                  <div className="visual-panel">
+                    {canRenderHeatmap ? (
+                      <HeatmapViewer
+                        data={results.heatmap_data!}
+                        xSize={results.heatmap_x_size!}
+                        ySize={results.heatmap_y_size!}
+                        title="State Divergence: Initial vs Obfuscated"
+                      />
+                    ) : (
+                      <div className="results-empty">{heatmapMessage}</div>
+                    )}
+                  </div>
+                  <div className="visual-panel">
+                    {canRenderAlignment ? (
+                      <AlignmentViewer
+                        matrix={results.alignment_matrix!}
+                        path={results.alignment_path}
+                        cStar={results.alignment_c_star}
+                        title="DTW Alignment: Initial vs Obfuscated"
+                        xLabel="Obfuscated Gate Index"
+                        yLabel="Initial Gate Index"
+                      />
+                    ) : (
+                      <div className="results-empty">{alignmentMessage}</div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </section>
@@ -800,8 +892,17 @@ export default function ExperimentsPage() {
         }
         .layout {
           display: grid;
-          grid-template-columns: 420px 1fr;
+          grid-template-columns: 320px 420px 1fr;
           gap: 24px;
+        }
+        .history-sidebar {
+          background: rgba(20, 20, 30, 0.8);
+          border: 1px solid rgba(100, 100, 150, 0.2);
+          border-radius: 16px;
+          padding: 16px;
+          height: calc(100vh - 120px);
+          position: sticky;
+          top: 24px;
         }
         @media (max-width: 1000px) {
           .layout {
@@ -1065,6 +1166,28 @@ export default function ExperimentsPage() {
           display: block;
           font-size: 0.65rem;
           color: rgba(200, 200, 220, 0.6);
+        }
+        .results-visuals {
+          margin-top: 16px;
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          gap: 16px;
+        }
+        .visual-panel {
+          min-height: 120px;
+        }
+        .results-empty {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 120px;
+          padding: 16px;
+          text-align: center;
+          font-size: 0.75rem;
+          color: rgba(200, 200, 220, 0.5);
+          background: rgba(20, 20, 30, 0.4);
+          border: 1px dashed rgba(100, 100, 150, 0.3);
+          border-radius: 10px;
         }
       `}</style>
     </div>

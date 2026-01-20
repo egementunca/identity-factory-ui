@@ -30,6 +30,10 @@ interface RightPanelProps {
   cycleNotation: string;
   isIdentity: boolean;
   permutation: number[];
+  selectedGateIds?: Set<string>;
+  // Performance flags
+  isTooManyGates?: boolean;
+  isTooManyWires?: boolean;
 }
 
 export default function RightPanel({
@@ -43,11 +47,15 @@ export default function RightPanel({
   cycleNotation,
   isIdentity,
   permutation,
+  selectedGateIds,
+  isTooManyGates = false,
+  isTooManyWires = false,
 }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState<PanelTab>('skeleton');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [showLocalSkeleton, setShowLocalSkeleton] = useState(true);
 
   // Resizable panel state
   const [panelWidth, setPanelWidth] = useState(320);
@@ -185,13 +193,54 @@ export default function RightPanel({
       <div className="flex-1 overflow-hidden">
         {activeTab === 'skeleton' && (
           <div className="h-full">
-            <SkeletonGraph
-              circuit={circuit}
-              highlightedGateId={highlightedGateId}
-              highlightedEdgeGates={highlightedEdgeGates}
-              onNodeClick={onNodeClick}
-              onEdgeClick={onEdgeClick}
-            />
+            <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
+              <div className="text-xs font-medium text-[var(--text-secondary)]">
+                {selectedGateIds && selectedGateIds.size > 0
+                  ? `Selected (${selectedGateIds.size})`
+                  : 'Full Circuit'}
+              </div>
+              {selectedGateIds && selectedGateIds.size > 0 && (
+                <label className="flex items-center gap-2 text-[10px] cursor-pointer">
+                  <span className="text-[var(--text-muted)]">Focus Selected</span>
+                  <input
+                    type="checkbox"
+                    checked={showLocalSkeleton}
+                    onChange={(e) => setShowLocalSkeleton(e.target.checked)}
+                    className="accent-[var(--accent-primary)]"
+                  />
+                </label>
+              )}
+            </div>
+            
+            {isTooManyGates && (!selectedGateIds || selectedGateIds.size === 0 || selectedGateIds.size > 200) && !showLocalSkeleton ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-4">
+                <Network className="w-12 h-12 text-[var(--text-muted)] mb-3 opacity-40" />
+                <div className="text-sm text-[var(--text-secondary)] mb-1">Skeleton Disabled</div>
+                <div className="text-xs text-[var(--text-muted)]">
+                  {circuit.gates.length} gates exceeds limit (200).
+                  <br />Select fewer gates to view graph.
+                </div>
+              </div>
+            ) : (
+              <SkeletonGraph
+                circuit={
+                  showLocalSkeleton && selectedGateIds && selectedGateIds.size > 0
+                    ? {
+                        ...circuit,
+                        gates: circuit.gates.filter((g) =>
+                          selectedGateIds.has(g.id)
+                        ),
+                      }
+                    : circuit
+                }
+                highlightedGateId={highlightedGateId}
+                highlightedEdgeGates={highlightedEdgeGates}
+                onNodeClick={onNodeClick}
+                onEdgeClick={onEdgeClick}
+                forceShow={!!(selectedGateIds && selectedGateIds.size > 0 && selectedGateIds.size <= 200)}
+                selectedGateIds={selectedGateIds}
+              />
+            )}
           </div>
         )}
 

@@ -10,7 +10,10 @@ import ToolPanel from './ToolPanel';
 import RightPanel from './RightPanel';
 import StatusBar from './StatusBar';
 import CircuitCanvasV2 from './CircuitCanvasV2';
+import IdentityBrowser from '../IdentityBrowser';
 import { PlaygroundCircuit, PlaygroundGate } from '@/types/api';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 
 const INITIAL_WIDTH = 4;
 const INITIAL_LENGTH = 12;
@@ -110,6 +113,7 @@ export default function PlaygroundPro() {
   const [highlightedEdgeGates, setHighlightedEdgeGates] = useState<
     [string, string] | null
   >(null);
+  const [interactionMode, setInteractionMode] = useState<'select' | 'add'>('add');
   const [placementMode, setPlacementMode] = useState<'auto' | 'manual'>('auto');
   const [pendingPlacement, setPendingPlacement] = useState<{
     step: number;
@@ -122,6 +126,10 @@ export default function PlaygroundPro() {
     reducedWidth: number;
   } | null>(null);
   const [zoom] = useState(0.85);
+
+  // Identity browser state
+  const [showIdentityBrowser, setShowIdentityBrowser] = useState(false);
+  const [isLoadingIdentity, setIsLoadingIdentity] = useState(false);
 
   // Helper to update current circuit
   const setCircuit = useCallback(
@@ -160,8 +168,73 @@ export default function PlaygroundPro() {
     [activeTabId]
   );
 
-  // Compute permutation and cycle notation
-  const { permutation, isIdentity, cycleNotation } = useMemo(() => {
+  // === PERFORMANCE THRESHOLDS ===
+  // Skip expensive computations for large circuits
+  const MAX_WIRES_FOR_PERMUTATION = 16; // 2^16 = 65536 states
+  const MAX_GATES_FOR_SKELETON = 200;   // O(n²) collision detection
+  const SAMPLE_SIZE_FOR_LARGE = 1000;   // Number of random samples to test
+  
+  const isTooManyWires = circuit.width > MAX_WIRES_FOR_PERMUTATION;
+  const isTooManyGates = circuit.gates.length > MAX_GATES_FOR_SKELETON;
+
+  // Helper: Apply circuit to a single input state
+  const applyCircuitToState = useCallback((state: number, gates: PlaygroundGate[], width: number): number => {
+    const sortedGates = [...gates].sort((a, b) => a.step - b.step);
+    let result = state;
+    for (const gate of sortedGates) {
+      if (gate.type === 'ECA57') {
+        const ctrl1Set = !!(result & (1 << gate.controls[0]));
+        const ctrl2Set = !!(result & (1 << gate.controls[1]));
+        if (ctrl1Set || !ctrl2Set) {
+          result ^= 1 << gate.target;
+        }
+      }
+    }
+    return result;
+  }, []);
+
+  // Compute permutation and cycle notation (SAMPLED for large circuits)
+  const { permutation, isIdentity, cycleNotation, skipped, samplesTested } = useMemo(() => {
+    // For large circuits, use sampling-based identity test
+    if (isTooManyWires) {
+      if (circuit.gates.length === 0) {
+        return {
+          permutation: [],
+          isIdentity: true,
+          cycleNotation: '() [empty circuit]',
+          skipped: true,
+          samplesTested: 0,
+        };
+      }
+      
+      // Sample N random inputs and test if output equals input
+      const numSamples = Math.min(SAMPLE_SIZE_FOR_LARGE, circuit.gates.length * 10);
+      const numStates = 1 << circuit.width; // This is a BigInt-safe operation for display only
+      let allIdentity = true;
+      let failedInput: number | null = null;
+      
+      for (let i = 0; i < numSamples && allIdentity; i++) {
+        // Generate random input (use safe integer range even for 32+ wires)
+        const input = Math.floor(Math.random() * Math.min(numStates, Number.MAX_SAFE_INTEGER));
+        const output = applyCircuitToState(input, circuit.gates, circuit.width);
+        if (input !== output) {
+          allIdentity = false;
+          failedInput = input;
+        }
+      }
+      
+      return {
+        permutation: [],
+        isIdentity: allIdentity,
+        cycleNotation: allIdentity 
+          ? `✓ [${numSamples} samples OK]` 
+          : `✗ [Failed at input ${failedInput}]`,
+        skipped: true,
+        samplesTested: numSamples,
+      };
+    }
+
+    // Full permutation for small circuits
     const width = circuit.width;
     const numStates = 1 << width;
     let perm = Array.from({ length: numStates }, (_, i) => i);
@@ -207,8 +280,10 @@ export default function PlaygroundPro() {
       permutation: perm,
       isIdentity: perm.every((val, idx) => val === idx),
       cycleNotation: cycleStr,
+      skipped: false,
+      samplesTested: 0,
     };
-  }, [circuit]);
+  }, [circuit, isTooManyWires, applyCircuitToState]);
 
   // Tab management
   const handleTabNew = useCallback(() => {
@@ -514,6 +589,198 @@ export default function PlaygroundPro() {
     setSelectedGateIds(() => new Set());
   }, [setCircuit, setSelectedGateIds]);
 
+  // === IDENTITY LOADING ===
+
+  // Parse .gate format (e.g., "012;123;234;") into PlaygroundGates
+  const parseGateString = useCallback((gateStr: string): { gates: PlaygroundGate[], detectedWidth: number } => {
+    const gateTokens = gateStr.split(';').filter(s => s.trim());
+    const gates: PlaygroundGate[] = [];
+    
+    // Character to wire index mapping - must match Rust's wire_to_char exactly
+    const charToWire = (c: string): number => {
+      const code = c.charCodeAt(0);
+      // 0-9 -> wires 0-9
+      if (code >= 48 && code <= 57) return code - 48;
+      // a-z -> wires 10-35
+      if (code >= 97 && code <= 122) return code - 97 + 10;
+      // A-Z -> wires 36-61
+      if (code >= 65 && code <= 90) return code - 65 + 36;
+      // Special characters for wires 62+
+      const specialChars: Record<string, number> = {
+        '!': 62, '@': 63, '#': 64, '$': 65, '%': 66,
+        '^': 67, '&': 68, '*': 69, '(': 70, ')': 71,
+        '-': 72, '_': 73, '=': 74, '+': 75, '[': 76,
+        ']': 77, '{': 78, '}': 79, '<': 80, '>': 81, '?': 82
+      };
+      return specialChars[c] ?? 0;
+    };
+
+    // First pass: detect max wire index used
+    let maxWire = 0;
+    gateTokens.forEach((token) => {
+      if (token.length >= 3) {
+        maxWire = Math.max(maxWire, charToWire(token[0]), charToWire(token[1]), charToWire(token[2]));
+      }
+    });
+    const detectedWidth = maxWire + 1; // Width is max wire index + 1
+
+    // Second pass: create gates
+    gateTokens.forEach((token, idx) => {
+      if (token.length >= 3) {
+        const target = charToWire(token[0]);
+        const ctrl1 = charToWire(token[1]);
+        const ctrl2 = charToWire(token[2]);
+        
+        gates.push({
+          id: `loaded-${Date.now()}-${idx}`,
+          type: 'ECA57',
+          step: idx,
+          target,
+          controls: [ctrl1, ctrl2],
+        });
+      }
+    });
+    
+    return { gates, detectedWidth };
+  }, []);
+
+  // Load circuit from string
+  const handleLoadCircuit = useCallback((circuitStr: string, wiresHint: number) => {
+    const { gates, detectedWidth } = parseGateString(circuitStr);
+    // Use detected width if it's larger than the hint, or if hint is small default
+    const finalWidth = Math.max(detectedWidth, wiresHint, MIN_WIDTH);
+    setCircuit(() => ({
+      width: finalWidth,
+      length: Math.max(gates.length + 2, INITIAL_LENGTH),
+      gates,
+    }));
+  }, [parseGateString, setCircuit]);
+
+  // Load latest identity from API
+  const handleLoadLatestIdentity = useCallback(async () => {
+    setIsLoadingIdentity(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/local-mixing/identities/latest`);
+      if (!res.ok) {
+        const listRes = await fetch(`${API_BASE}/api/v1/local-mixing/identities/saved`);
+        if (!listRes.ok) throw new Error('No identities available');
+        const listData = await listRes.json();
+        if (!listData.identities || listData.identities.length === 0) {
+          alert('No identity circuits found. Generate some using grow-identity first.');
+          return;
+        }
+        const first = listData.identities[0];
+        const fileRes = await fetch(`${API_BASE}/api/v1/local-mixing/identities/saved/${first.filename}`);
+        if (!fileRes.ok) throw new Error('Failed to load identity');
+        const fileData = await fileRes.json();
+        handleLoadCircuit(fileData.circuit_str, fileData.wires || 8);
+        return;
+      }
+      const data = await res.json();
+      handleLoadCircuit(data.circuit_str, data.wires || 8);
+    } catch (err) {
+      console.error('Failed to load latest identity:', err);
+      alert('Failed to load identity. Check if API is running.');
+    } finally {
+      setIsLoadingIdentity(false);
+    }
+  }, [handleLoadCircuit]);
+
+  // === SKELETON GENERATION ===
+  
+  const [isGeneratingSkeleton, setIsGeneratingSkeleton] = useState(false); // Deprecated
+  const [skeletonStatus, setSkeletonStatus] = useState<'idle' | 'generating' | 'success' | 'error'>('idle');
+  const [skeletonError, setSkeletonError] = useState<string | undefined>(undefined);
+
+  const handleGenerateSkeleton = useCallback(async (gateCount: number, chainLength?: number) => {
+    setSkeletonStatus('generating');
+    setSkeletonError(undefined);
+    try {
+        // Start generation
+        const res = await fetch(`${API_BASE}/api/v1/generators/run`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                generator_name: 'skeleton',
+                width: circuit.width,
+                gate_count: gateCount,
+                gate_set: 'eca57',
+                max_circuits: 1,
+                config: {
+                    chain_length: chainLength,
+                    avoid_adjacent_identical: true
+                }
+            })
+        });
+        
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Failed to start generation');
+        }
+        
+        const { run_id } = await res.json();
+        
+        // Poll for completion
+        const pollInterval = setInterval(async () => {
+            try {
+                const statusRes = await fetch(`${API_BASE}/api/v1/generators/runs/${run_id}`);
+                const statusData = await statusRes.json();
+                
+                if (statusData.status === 'completed') {
+                    clearInterval(pollInterval);
+                    const resultRes = await fetch(`${API_BASE}/api/v1/generators/runs/${run_id}/result`);
+                    const resultData = await resultRes.json();
+                    
+                    if (resultData.success && resultData.circuit_ids && resultData.circuit_ids.length > 0) {
+                         const circuitId = resultData.circuit_ids[0];
+                         // Fetch the circuit
+                         const circuitRes = await fetch(`${API_BASE}/api/v1/circuits/${circuitId}`);
+                         if (circuitRes.ok) {
+                             const circuitData = await circuitRes.json();
+                             // Convert gates
+                             const newGates: PlaygroundGate[] = circuitData.gates.map((g: any, idx: number) => ({
+                                 id: `gen-skel-${Date.now()}-${idx}`,
+                                 type: 'ECA57',
+                                 step: idx,
+                                 target: g[0],
+                                 controls: [g[1], g[2]]
+                             }));
+                             
+                             setCircuit((prev) => ({
+                                 ...prev,
+                                 gates: newGates,
+                                 length: Math.max(prev.length, newGates.length + 2)
+                             }));
+                             setSkeletonStatus('success');
+                             setTimeout(() => setSkeletonStatus('idle'), 2000);
+                         } else {
+                             setSkeletonStatus('error');
+                             setSkeletonError('Failed to load generated circuit');
+                         }
+                    } else {
+                        setSkeletonStatus('error');
+                        setSkeletonError('No circuit found (UNSAT) or generation failed.');
+                    }
+                } else if (statusData.status === 'failed' || statusData.status === 'cancelled') {
+                    clearInterval(pollInterval);
+                    setSkeletonStatus('error');
+                    setSkeletonError(`Generation failed: ${statusData.error}`);
+                }
+            } catch (e: any) {
+                console.error(e);
+                clearInterval(pollInterval);
+                setSkeletonStatus('error');
+                setSkeletonError(e.message || 'Polling failed');
+            }
+        }, 500);
+        
+    } catch (e: any) {
+        console.error(e);
+        setSkeletonStatus('error');
+        setSkeletonError(`Failed to start: ${e.message}`);
+    }
+  }, [circuit.width, setCircuit]);
+
   // === GROUP OPERATIONS (for identity circuits) ===
 
   // Rotate: shift all gate steps circularly by n
@@ -742,6 +1009,9 @@ export default function PlaygroundPro() {
             onRandom={handleRandom}
             onReorder={handleReorder}
             onClear={handleClear}
+            onLoadLatest={handleLoadLatestIdentity}
+            onBrowseIdentities={() => setShowIdentityBrowser(true)}
+            isLoadingIdentity={isLoadingIdentity}
             placementMode={placementMode}
             onSetPlacementMode={setPlacementMode}
             pendingPlacement={pendingPlacement}
@@ -753,12 +1023,18 @@ export default function PlaygroundPro() {
             onPaste={handlePaste}
             onDelete={handleDelete}
             onSelectAll={handleSelectAll}
+            // Interaction Mode
+            interactionMode={interactionMode}
+            onSetInteractionMode={setInteractionMode}
             // Group operations
             isIdentity={isIdentity}
             onRotateLeft={() => handleRotate(-1)}
             onRotateRight={() => handleRotate(1)}
             onReverse={handleReverse}
             onRandomPermute={handleRandomPermute}
+            onGenerateSkeleton={handleGenerateSkeleton}
+            skeletonGeneratonStatus={skeletonStatus}
+            skeletonGenerationError={skeletonError}
           />
 
           {/* Canvas */}
@@ -772,7 +1048,8 @@ export default function PlaygroundPro() {
               onGateMove={handleGateMove}
               onGateRemove={handleGateRemove}
               onControlEdit={handleControlEdit}
-              selectedTool="ECA57"
+              selectedTool={interactionMode === 'add' ? 'ECA57' : null}
+              interactionMode={interactionMode}
               zoom={zoom}
               pendingPlacement={pendingPlacement}
               selectedGateIds={selectedGateIds}
@@ -800,6 +1077,9 @@ export default function PlaygroundPro() {
             cycleNotation={cycleNotation}
             isIdentity={isIdentity}
             permutation={permutation}
+            selectedGateIds={selectedGateIds}
+            isTooManyGates={isTooManyGates}
+            isTooManyWires={isTooManyWires}
           />
         </div>
 
@@ -811,8 +1091,17 @@ export default function PlaygroundPro() {
           selectedCount={selectedGateIds.size}
           clipboardCount={clipboard?.gates.length || 0}
           cycleNotation={cycleNotation}
+          isTooManyWires={isTooManyWires}
+          isTooManyGates={isTooManyGates}
         />
       </div>
+
+      {/* Identity Browser Modal */}
+      <IdentityBrowser
+        isOpen={showIdentityBrowser}
+        onClose={() => setShowIdentityBrowser(false)}
+        onLoadCircuit={handleLoadCircuit}
+      />
     </DndProvider>
   );
 }

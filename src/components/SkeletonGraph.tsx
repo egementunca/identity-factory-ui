@@ -18,6 +18,8 @@ interface SkeletonGraphProps {
   highlightedEdgeGates?: [string, string] | null; // NEW: highlight gates connected by clicked edge
   onNodeClick?: (gateId: string) => void;
   onEdgeClick?: (gate1Id: string, gate2Id: string) => void;
+  forceShow?: boolean;
+  selectedGateIds?: Set<string>;
 }
 
 // Check if two gates collide (share any wire)
@@ -93,6 +95,8 @@ export default function SkeletonGraph({
   highlightedEdgeGates,
   onNodeClick,
   onEdgeClick,
+  forceShow,
+  selectedGateIds,
 }: SkeletonGraphProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [hoveredEdge, setHoveredEdge] = useState<string | null>(null);
@@ -159,13 +163,15 @@ export default function SkeletonGraph({
         },
         style: {
           backgroundColor: color,
-          border: isEdgeHighlighted
-            ? '3px solid #facc15' // yellow for edge highlight
-            : isHighlighted
-              ? '3px solid white'
-              : isHovered
-                ? '2px solid white'
-                : '1px solid rgba(255,255,255,0.3)',
+           border: isEdgeHighlighted
+             ? '3px solid #facc15' // yellow for edge highlight
+             : isHighlighted
+               ? '3px solid white'
+               : selectedGateIds?.has(gate.id)
+                 ? '2px solid #60a5fa' // blue for selection
+                 : isHovered
+                   ? '2px solid white'
+                   : '1px solid rgba(255,255,255,0.3)',
           borderRadius: '8px',
           padding: '8px',
           color: 'white',
@@ -176,10 +182,12 @@ export default function SkeletonGraph({
           justifyContent: 'center',
           cursor: 'pointer',
           boxShadow: isEdgeHighlighted
-            ? '0 0 20px #facc15'
-            : isHighlighted
-              ? '0 0 15px ' + color
-              : '0 2px 5px rgba(0,0,0,0.3)',
+             ? '0 0 20px #facc15'
+             : isHighlighted
+               ? '0 0 15px ' + color
+               : selectedGateIds?.has(gate.id)
+                 ? '0 0 10px rgba(96, 165, 250, 0.5)'
+                 : '0 2px 5px rgba(0,0,0,0.3)',
           transition: 'all 0.2s ease',
         },
         sourcePosition: Position.Right,
@@ -193,6 +201,7 @@ export default function SkeletonGraph({
     highlightedGateId,
     highlightedEdgeGates,
     hoveredNode,
+    selectedGateIds,
   ]);
 
   // Create React Flow edges

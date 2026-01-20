@@ -60,13 +60,7 @@ export default function Dashboard() {
   return (
     <div className="page">
       <Navigation />
-
       <main className="page-content">
-        <header className="hero">
-          <h1>⚡ Gate 57 Circuit Factory</h1>
-          <p>Unified circuit generation, analysis, and exploration</p>
-        </header>
-
         {/* Stats Overview */}
         <section className="section">
           <h2>Database Overview</h2>

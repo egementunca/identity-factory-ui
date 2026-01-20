@@ -57,12 +57,6 @@ const navItems: NavItem[] = [
     icon: <Search size={20} />,
     description: 'Explore ECA57 Identities',
   },
-  {
-    label: 'ECA57 Playground',
-    href: '/eca57-playground',
-    icon: <Zap size={20} />,
-    description: 'ECA57 Interactive Builder',
-  },
 ];
 
 export default function Navigation() {
