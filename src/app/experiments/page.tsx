@@ -62,8 +62,10 @@ const paramDescriptions: Record<string, string> = {
     'Enable bookendless mode for abbutterfly. Skips initial/final structure padding',
   wires: 'Number of qubits/wires in the circuit (3-64)',
   initial_gates: 'Number of ECA57 gates in the starting circuit',
-  rounds:
+  rounds_butterfly:
     'Butterfly obfuscation iterations. Each round: wrap in R·x·R⁻¹ → expand → compress',
+  rounds_rac:
+    'RAC obfuscation iterations. Each round: sequential pair replacement → parallel compression until stable',
   shooting_count:
     'Gate reordering at start. Randomly moves gates left/right as far as possible without collision, scrambling gate ordering',
   shooting_count_inner:
@@ -438,9 +440,10 @@ export default function ExperimentsPage() {
                     <option value="abbutterfly">Abbutterfly (Asymmetric)</option>
                     <option value="bbutterfly">Bbutterfly (Symmetric)</option>
                     <option value="butterfly">Butterfly (Standard)</option>
+                    <option value="rac">RAC (Replace And Compress)</option>
                   </select>
                 </FormField>
-                <FormField label="Rounds" field="rounds">
+                <FormField label="Rounds" field={config.obfuscation.strategy === 'rac' ? 'rounds_rac' : 'rounds_butterfly'}>
                   <input
                     type="number"
                     min={1}
@@ -519,7 +522,7 @@ export default function ExperimentsPage() {
                 >
                   <input
                     type="number"
-                    min={3}
+                    min={0}
                     value={config.obfuscation.structure_block_size_min}
                     onChange={(e) =>
                       updateObf(
@@ -536,7 +539,7 @@ export default function ExperimentsPage() {
                 >
                   <input
                     type="number"
-                    min={3}
+                    min={0}
                     value={config.obfuscation.structure_block_size_max}
                     onChange={(e) =>
                       updateObf(

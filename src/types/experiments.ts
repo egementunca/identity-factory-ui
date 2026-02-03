@@ -1,5 +1,5 @@
 export interface ObfuscationParams {
-    strategy: 'abbutterfly' | 'bbutterfly' | 'butterfly';
+    strategy: 'abbutterfly' | 'bbutterfly' | 'butterfly' | 'rac';
     bookendless: boolean;
     structure_block_size_min: number;
     structure_block_size_max: number;

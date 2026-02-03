@@ -54,6 +54,10 @@ export default function ClusterDatabaseView() {
   const [queryTotal, setQueryTotal] = useState(0);
   const [queryOffset, setQueryOffset] = useState(0);
   const [diverseTargets, setDiverseTargets] = useState(false);
+  const [excludeReducible, setExcludeReducible] = useState(false);
+  const [onlyReducible, setOnlyReducible] = useState(false);
+  const [queryError, setQueryError] = useState<string | null>(null);
+  const [hasQueried, setHasQueried] = useState(false);
 
   // Selected circuit for detail view
   const [selectedCircuit, setSelectedCircuit] = useState<ClusterCircuit | null>(
@@ -82,11 +86,15 @@ export default function ClusterDatabaseView() {
 
   const executeQuery = async (offset = 0) => {
     setQueryLoading(true);
+    setQueryError(null);
+    setHasQueried(true);
     try {
       let url = `${API_BASE}/cluster-database/circuits?limit=50&offset=${offset}`;
       if (selectedWidth !== null) url += `&width=${selectedWidth}`;
       if (selectedGates !== null) url += `&gate_count=${selectedGates}`;
       if (diverseTargets) url += `&diverse_targets=true`;
+      if (excludeReducible) url += `&exclude_reducible=true`;
+      if (onlyReducible) url += `&only_reducible=true`;
 
       const res = await fetch(url);
       if (res.ok) {
@@ -94,9 +102,17 @@ export default function ClusterDatabaseView() {
         setQueryResults(data.circuits || []);
         setQueryTotal(data.total || 0);
         setQueryOffset(offset);
+      } else {
+        const errorData = await res.json().catch(() => ({ detail: 'Unknown error' }));
+        setQueryError(errorData.detail || `Query failed with status ${res.status}`);
+        setQueryResults([]);
+        setQueryTotal(0);
       }
     } catch (e) {
       console.error('Query failed:', e);
+      setQueryError(e instanceof Error ? e.message : 'Network error - is the API server running?');
+      setQueryResults([]);
+      setQueryTotal(0);
     } finally {
       setQueryLoading(false);
     }
@@ -117,15 +133,35 @@ export default function ClusterDatabaseView() {
       .sort((a, b) => a.width - b.width);
   }, [dimGroups]);
 
+  // Filter gate counts based on selected width (if any)
   const gateData = useMemo(() => {
+    const filtered = selectedWidth !== null
+      ? dimGroups.filter(d => d.width === selectedWidth)
+      : dimGroups;
+
     const grouped: Record<number, number> = {};
-    dimGroups.forEach((d) => {
+    filtered.forEach((d) => {
       grouped[d.gate_count] = (grouped[d.gate_count] || 0) + d.circuit_count;
     });
     return Object.entries(grouped)
       .map(([g, c]) => ({ gates: Number(g), count: c }))
       .sort((a, b) => a.gates - b.gates);
-  }, [dimGroups]);
+  }, [dimGroups, selectedWidth]);
+
+  // Filter widths based on selected gate count (if any)
+  const filteredWidthData = useMemo(() => {
+    const filtered = selectedGates !== null
+      ? dimGroups.filter(d => d.gate_count === selectedGates)
+      : dimGroups;
+
+    const grouped: Record<number, number> = {};
+    filtered.forEach((d) => {
+      grouped[d.width] = (grouped[d.width] || 0) + d.circuit_count;
+    });
+    return Object.entries(grouped)
+      .map(([w, c]) => ({ width: Number(w), count: c }))
+      .sort((a, b) => a.width - b.width);
+  }, [dimGroups, selectedGates]);
 
   const maxWidthCount = Math.max(...widthData.map((d) => d.count), 1);
   const maxGateCount = Math.max(...gateData.map((d) => d.count), 1);
@@ -401,6 +437,8 @@ export default function ClusterDatabaseView() {
                 onClick={() => {
                   setSelectedWidth(d.width);
                   setSelectedGates(d.gate_count);
+                  // Auto-query when clicking heatmap cell
+                  setTimeout(() => executeQuery(0), 100);
                 }}
                 title={`${d.width}w × ${d.gate_count}g: ${d.circuit_count.toLocaleString()} circuits`}
               >
@@ -425,12 +463,22 @@ export default function ClusterDatabaseView() {
           <div className="query-filters">
             <select
               value={selectedWidth ?? ''}
-              onChange={(e) =>
-                setSelectedWidth(e.target.value ? Number(e.target.value) : null)
-              }
+              onChange={(e) => {
+                const newWidth = e.target.value ? Number(e.target.value) : null;
+                setSelectedWidth(newWidth);
+                // Clear gate selection if it doesn't exist for this width
+                if (newWidth !== null && selectedGates !== null) {
+                  const validGates = dimGroups
+                    .filter(d => d.width === newWidth)
+                    .map(d => d.gate_count);
+                  if (!validGates.includes(selectedGates)) {
+                    setSelectedGates(null);
+                  }
+                }
+              }}
             >
               <option value="">All Widths</option>
-              {widthData.map((d) => (
+              {(selectedGates !== null ? filteredWidthData : widthData).map((d) => (
                 <option key={d.width} value={d.width}>
                   {d.width} wires ({d.count.toLocaleString()})
                 </option>
@@ -438,9 +486,19 @@ export default function ClusterDatabaseView() {
             </select>
             <select
               value={selectedGates ?? ''}
-              onChange={(e) =>
-                setSelectedGates(e.target.value ? Number(e.target.value) : null)
-              }
+              onChange={(e) => {
+                const newGates = e.target.value ? Number(e.target.value) : null;
+                setSelectedGates(newGates);
+                // Clear width selection if it doesn't exist for this gate count
+                if (newGates !== null && selectedWidth !== null) {
+                  const validWidths = dimGroups
+                    .filter(d => d.gate_count === newGates)
+                    .map(d => d.width);
+                  if (!validWidths.includes(selectedWidth)) {
+                    setSelectedWidth(null);
+                  }
+                }
+              }}
             >
               <option value="">All Gate Counts</option>
               {gateData.map((d) => (
@@ -457,11 +515,109 @@ export default function ClusterDatabaseView() {
               />
               Diverse Targets Only
             </label>
-            <button onClick={() => executeQuery(0)} className="query-btn">
-              <Filter size={16} /> Query
+            <label className="filter-checkbox">
+              <input
+                type="checkbox"
+                checked={excludeReducible}
+                onChange={(e) => {
+                  setExcludeReducible(e.target.checked);
+                  if (e.target.checked) setOnlyReducible(false);
+                }}
+              />
+              Exclude Reducible
+            </label>
+            <label className="filter-checkbox warning">
+              <input
+                type="checkbox"
+                checked={onlyReducible}
+                onChange={(e) => {
+                  setOnlyReducible(e.target.checked);
+                  if (e.target.checked) setExcludeReducible(false);
+                }}
+              />
+              Show Reducible Only
+            </label>
+            <button
+              onClick={() => executeQuery(0)}
+              className="query-btn"
+              disabled={queryLoading}
+            >
+              {queryLoading ? (
+                <>
+                  <RefreshCw size={16} className="spinning" /> Querying...
+                </>
+              ) : (
+                <>
+                  <Filter size={16} /> Query
+                </>
+              )}
             </button>
           </div>
         </div>
+
+        {/* Selection preview */}
+        {(selectedWidth !== null || selectedGates !== null) && (
+          <div className="selection-preview">
+            {(() => {
+              // Find matching dim group
+              const match = dimGroups.find(
+                d =>
+                  (selectedWidth === null || d.width === selectedWidth) &&
+                  (selectedGates === null || d.gate_count === selectedGates)
+              );
+              const exactMatch = selectedWidth !== null && selectedGates !== null
+                ? dimGroups.find(d => d.width === selectedWidth && d.gate_count === selectedGates)
+                : null;
+
+              if (selectedWidth !== null && selectedGates !== null) {
+                if (exactMatch) {
+                  return (
+                    <span className="preview-valid">
+                      {selectedWidth}w × {selectedGates}g = {exactMatch.circuit_count.toLocaleString()} circuits
+                    </span>
+                  );
+                } else {
+                  return (
+                    <span className="preview-invalid">
+                      No circuits for {selectedWidth}w × {selectedGates}g combination
+                    </span>
+                  );
+                }
+              } else if (selectedWidth !== null) {
+                const total = dimGroups
+                  .filter(d => d.width === selectedWidth)
+                  .reduce((sum, d) => sum + d.circuit_count, 0);
+                return <span className="preview-partial">{selectedWidth} wires: {total.toLocaleString()} circuits total</span>;
+              } else if (selectedGates !== null) {
+                const total = dimGroups
+                  .filter(d => d.gate_count === selectedGates)
+                  .reduce((sum, d) => sum + d.circuit_count, 0);
+                return <span className="preview-partial">{selectedGates} gates: {total.toLocaleString()} circuits total</span>;
+              }
+              return null;
+            })()}
+          </div>
+        )}
+
+        {/* Query Error */}
+        {queryError && (
+          <div className="query-error">
+            <X size={16} />
+            <span>{queryError}</span>
+            <button onClick={() => setQueryError(null)} className="dismiss-btn">
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* No Results Message */}
+        {hasQueried && !queryLoading && !queryError && queryTotal === 0 && (
+          <div className="no-results">
+            <Search size={20} />
+            <span>No circuits found matching your criteria</span>
+            <p>Try adjusting filters or querying without filters</p>
+          </div>
+        )}
 
         {queryTotal > 0 && (
           <div className="query-results">
@@ -1330,6 +1486,106 @@ export default function ClusterDatabaseView() {
           width: 16px;
           height: 16px;
           accent-color: #64ff96;
+        }
+
+        .filter-checkbox.warning {
+          color: #ffb464;
+        }
+
+        .filter-checkbox.warning input {
+          accent-color: #ffb464;
+        }
+
+        .query-btn:disabled {
+          opacity: 0.7;
+          cursor: not-allowed;
+        }
+
+        .spinning {
+          animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(360deg);
+          }
+        }
+
+        .query-error {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-top: 16px;
+          padding: 16px 20px;
+          background: rgba(255, 100, 100, 0.15);
+          border: 1px solid rgba(255, 100, 100, 0.4);
+          border-radius: 10px;
+          color: #ff8a8a;
+        }
+
+        .query-error span {
+          flex: 1;
+        }
+
+        .dismiss-btn {
+          background: rgba(255, 100, 100, 0.2);
+          border: 1px solid rgba(255, 100, 100, 0.3);
+          border-radius: 6px;
+          padding: 6px 12px;
+          color: #ff8a8a;
+          cursor: pointer;
+          font-size: 0.85rem;
+        }
+
+        .dismiss-btn:hover {
+          background: rgba(255, 100, 100, 0.3);
+        }
+
+        .no-results {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          margin-top: 16px;
+          padding: 40px 20px;
+          background: rgba(100, 100, 150, 0.1);
+          border: 1px dashed rgba(100, 100, 150, 0.3);
+          border-radius: 12px;
+          color: rgba(200, 200, 220, 0.6);
+        }
+
+        .no-results span {
+          font-size: 1rem;
+          color: rgba(200, 200, 220, 0.8);
+        }
+
+        .no-results p {
+          margin: 0;
+          font-size: 0.85rem;
+        }
+
+        .selection-preview {
+          margin-top: 12px;
+          padding: 10px 16px;
+          background: rgba(100, 100, 150, 0.1);
+          border-radius: 8px;
+          font-size: 0.9rem;
+        }
+
+        .preview-valid {
+          color: #64ff96;
+        }
+
+        .preview-invalid {
+          color: #ff8a8a;
+        }
+
+        .preview-partial {
+          color: rgba(200, 200, 220, 0.8);
         }
       `}</style>
     </div>

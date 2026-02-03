@@ -295,3 +295,86 @@ export async function getECA57Equivalents(
   if (!res.ok) throw new Error('Failed to fetch equivalents');
   return res.json();
 }
+
+// ===== Skeleton Identity Database API =====
+
+export interface SkeletonCircuit {
+  id: string;
+  width: number;
+  gate_count: number;
+  gates: number[][];
+  gate_string: string;
+  taxonomy: string;
+  is_identity: boolean;
+  is_fully_noncommuting: boolean;
+}
+
+export interface SkeletonCircuitDetail extends SkeletonCircuit {
+  collision_edges: number[][];
+}
+
+export interface TaxonomyStats {
+  taxonomy: string;
+  taxonomy_key?: string;
+  circuit_count: number;
+  gate_sizes: Record<number, number>;
+}
+
+export interface WidthDetailedStats {
+  width: number;
+  circuit_count: number;
+  taxonomies: TaxonomyStats[];
+  all_fully_noncommuting: boolean;
+}
+
+export interface SkeletonExplorerStats {
+  widths: WidthDetailedStats[];
+  total_circuits: number;
+  total_taxonomies: number;
+}
+
+export async function getSkeletonStats(): Promise<SkeletonExplorerStats> {
+  const res = await fetch(`${API_BASE}/skeleton/explorer/stats`);
+  if (!res.ok) throw new Error('Failed to fetch skeleton stats');
+  return res.json();
+}
+
+export async function getSkeletonTaxonomies(width: number): Promise<TaxonomyStats[]> {
+  const res = await fetch(`${API_BASE}/skeleton/explorer/taxonomies/${width}`);
+  if (!res.ok) throw new Error(`Failed to fetch taxonomies for width ${width}`);
+  return res.json();
+}
+
+export async function getSkeletonCircuits(
+  width: number,
+  taxonomy?: string,
+  offset: number = 0,
+  limit: number = 20
+): Promise<SkeletonCircuit[]> {
+  const params = new URLSearchParams({
+    offset: String(offset),
+    limit: String(limit),
+  });
+  if (taxonomy) params.set('taxonomy', taxonomy);
+  const res = await fetch(`${API_BASE}/skeleton/explorer/circuits/${width}?${params}`);
+  if (!res.ok) throw new Error(`Failed to fetch skeleton circuits for width ${width}`);
+  return res.json();
+}
+
+export async function getSkeletonCircuitDetail(
+  width: number,
+  taxonomy: string,
+  index: number
+): Promise<SkeletonCircuitDetail> {
+  // URL-encode taxonomy since it contains special characters like parentheses and commas
+  const encodedTaxonomy = encodeURIComponent(taxonomy);
+  const res = await fetch(`${API_BASE}/skeleton/explorer/circuit/${width}/${encodedTaxonomy}/${index}`);
+  if (!res.ok) throw new Error('Skeleton circuit not found');
+  return res.json();
+}
+
+export async function getRandomSkeletonCircuit(width: number): Promise<SkeletonCircuit> {
+  const res = await fetch(`${API_BASE}/skeleton/random/${width}`);
+  if (!res.ok) throw new Error(`No skeleton circuits for width ${width}`);
+  return res.json();
+}

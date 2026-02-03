@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useCallback, useState } from 'react';
+import React, { useMemo, useCallback, useState, useEffect } from 'react';
 import ReactFlow, {
   Node,
   Edge,
@@ -22,18 +22,19 @@ interface SkeletonGraphProps {
   selectedGateIds?: Set<string>;
 }
 
-// Check if two gates collide (share any wire)
-// Gates collide iff they share ANY wire (target or controls)
+// Check if two gates collide (do not commute)
+// In reversible logic (CNOT/Toffoli/Fredkin), gates collide iff:
+// Target of A overlaps with Controls of B OR Target of B overlaps with Controls of A.
+// Target-Target and Control-Control pairs COMMUTE (do not collide).
 function gatesCollide(g1: PlaygroundGate, g2: PlaygroundGate): boolean {
-  const wires1 = new Set([g1.target, ...g1.controls]);
-  const wires2 = new Set([g2.target, ...g2.controls]);
-  for (const w of wires1) {
-    if (wires2.has(w)) return true;
-  }
+  // Check if g1.target is in g2.controls
+  if (g2.controls.includes(g1.target)) return true;
+  // Check if g2.target is in g1.controls
+  if (g1.controls.includes(g2.target)) return true;
   return false;
 }
 
-// Get topological levels from collision edges
+// Get topological levels from skeleton edges
 function getTopologicalLevels(
   gates: PlaygroundGate[],
   edges: [number, number][]
@@ -59,7 +60,7 @@ function getTopologicalLevels(
     }
 
     if (level.length === 0) {
-      // Cycle detected, just add remaining
+      // Cycle detected (should not happen in skeleton graph of valid circuit, but safety fallback)
       level.push(...remaining);
       remaining.clear();
     } else {
@@ -98,22 +99,56 @@ export default function SkeletonGraph({
   forceShow,
   selectedGateIds,
 }: SkeletonGraphProps) {
+  useEffect(() => {
+    console.log('[SkeletonGraph] Component loaded using UPDATED collision logic (Target-Control only)');
+  }, []);
+
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [hoveredEdge, setHoveredEdge] = useState<string | null>(null);
 
-  // Build collision edges and levels
-  const { collisionEdges, levels, nodeToLevel } = useMemo(() => {
+  // Build skeleton edges and levels
+  const { skeletonEdges, levels, nodeToLevel } = useMemo(() => {
     const gates = circuit.gates;
     const sortedGates = [...gates].sort((a, b) => a.step - b.step);
+    
+    // 1. Compute full collision set (Dependency Graph)
+    // collisionMap[i] contains all j > i such that i and j collide
+    const collisions = new Map<number, Set<number>>();
+    
+    for (let i = 0; i < sortedGates.length; i++) {
+        collisions.set(i, new Set());
+        for (let j = i + 1; j < sortedGates.length; j++) {
+            if (gatesCollide(sortedGates[i], sortedGates[j])) {
+                collisions.get(i)!.add(j);
+            }
+        }
+    }
+
+    // 2. Filter edges to form Skeleton Graph
+    // Edge i->j exists iff i and j collide AND NO k (i < k < j) collides with BOTH i and j
     const edges: [number, number][] = [];
 
-    // Build collision edges between sorted gate indices
     for (let i = 0; i < sortedGates.length; i++) {
-      for (let j = i + 1; j < sortedGates.length; j++) {
-        if (gatesCollide(sortedGates[i], sortedGates[j])) {
-          edges.push([i, j]);
+        const i_collisions = collisions.get(i)!;
+        for (const j of i_collisions) {
+            let isRedundant = false;
+            // Check for intermediate k
+            for (let k = i + 1; k < j; k++) {
+                // Check if k collides with i (i.e. if k is in i's collision list)
+                // AND k collides with j (i.e. if j is in k's collision list)
+                // Note: collision list only stores forward collisions, but collision is symmetric.
+                // i < k, so check if k is in collisions[i]
+                // k < j, so check if j is in collisions[k]
+                if (i_collisions.has(k) && collisions.get(k)!.has(j)) {
+                    isRedundant = true;
+                    break;
+                }
+            }
+            
+            if (!isRedundant) {
+                edges.push([i, j]);
+            }
         }
-      }
     }
 
     const levels = getTopologicalLevels(sortedGates, edges);
@@ -126,7 +161,7 @@ export default function SkeletonGraph({
       });
     });
 
-    return { collisionEdges: edges, levels, nodeToLevel, sortedGates };
+    return { skeletonEdges: edges, levels, nodeToLevel, sortedGates };
   }, [circuit.gates]);
 
   // Create React Flow nodes
@@ -208,7 +243,7 @@ export default function SkeletonGraph({
   const edges: Edge[] = useMemo(() => {
     const sortedGates = [...circuit.gates].sort((a, b) => a.step - b.step);
 
-    return collisionEdges.map(([src, dst], idx) => {
+    return skeletonEdges.map(([src, dst], idx) => {
       const srcGate = sortedGates[src];
       const dstGate = sortedGates[dst];
       const edgeId = `${srcGate.id}-${dstGate.id}`;
@@ -230,7 +265,7 @@ export default function SkeletonGraph({
         },
       };
     });
-  }, [collisionEdges, circuit.gates, hoveredEdge]);
+  }, [skeletonEdges, circuit.gates, hoveredEdge]);
 
   const handleNodeClick = useCallback(
     (event: React.MouseEvent, node: Node) => {

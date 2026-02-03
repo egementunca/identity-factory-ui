@@ -9,12 +9,14 @@ This document maps routes to page files, key components, and backend dependencie
 | `/` | `src/app/page.tsx` | `Navigation`, `StatsCards` | `GET /api/v1/stats`, `GET /api/v1/dim-groups` |
 | `/generators` | `src/app/generators/page.tsx` | `GeneratorCard`, `RunsList` | `GET /api/v1/generators/`, `POST /api/v1/generators/run`, `GET /api/v1/generators/runs/`, `POST /api/v1/generators/runs/{id}/cancel`, `DELETE /api/v1/generators/runs/{id}` |
 | `/databases` | `src/app/databases/page.tsx` | `DualDatabaseView`, `CircuitsDatabaseView`, `GoDatabaseView`, `IrreducibleDatabaseView` | `GET /api/v1/sat-database/*`, `GET /api/v1/go-database/*`, `GET /api/v1/cluster-database/*`, `GET /api/v1/irreducible/*`, `GET /api/v1/stats`, `GET /api/v1/circuits` |
+| `/wire-shuffler` | `src/app/wire-shuffler/page.tsx` | Wire shuffler explorer UI | `GET /api/v1/wire-shuffler/stats`, `GET /api/v1/wire-shuffler/metrics-summary`, `GET /api/v1/wire-shuffler/permutations`, `GET /api/v1/wire-shuffler/circuits` |
 | `/cluster` | `src/app/cluster/page.tsx` | `ClusterDatabaseView` | `GET /api/v1/cluster-database/*` |
 | `/playground` | `src/app/playground/page.tsx` | `CircuitPlayground` | None (local-only calculations) |
 | `/playground-v2` | `src/app/playground-v2/page.tsx` | `PlaygroundPro`, `CircuitCanvasV2`, `ToolPanel`, `RightPanel`, `StatusBar` | None (local-only calculations) |
 | `/eca57-playground` | `src/app/eca57-playground/page.tsx` | `ECA57Playground`, `SkeletonGraph` | None (local-only calculations) |
 | `/eca57-explorer` | `src/app/eca57-explorer/page.tsx` | ECA57 LMDB explorer UI + inline SVG diagrams | `GET /api/v1/eca57-lmdb/*` |
 | `/experiments` | `src/app/experiments/page.tsx` | `InfoTooltip`, `HeatmapViewer` | `GET /api/v1/experiments/presets`, `POST /api/v1/experiments/start`, `GET /api/v1/experiments/{id}/stream`, `GET /api/v1/experiments/{id}/results` |
+| `/skeleton-explorer` | `src/app/skeleton-explorer/page.tsx` | Inline `CircuitDiagram`, `CollisionChainGraph`, `CircuitDetailModal` | `GET /api/v1/skeleton/explorer/stats`, `GET /api/v1/skeleton/explorer/taxonomies/{width}`, `GET /api/v1/skeleton/explorer/circuits/{width}`, `GET /api/v1/skeleton/explorer/circuit/{width}/{taxonomy}/{index}` |
 
 Notes:
 - `CircuitsDatabaseView` and `IrreducibleDatabaseView` fetch directly from `http://localhost:8000` instead of using `src/lib/api.ts`.
@@ -45,6 +47,10 @@ Notes:
 - `src/app/eca57-explorer/page.tsx` - LMDB explorer with circuit diagrams, skeleton graph, and equivalence views.
 - `src/components/SkeletonGraph.tsx` - Reusable collision graph display.
 
+### Skeleton identity explorer
+- `src/app/skeleton-explorer/page.tsx` - Browser for skeleton identity circuits (fully noncommuting) from local_mixing/db.
+- Inline components: `CircuitDiagram`, `CollisionChainGraph`, `CircuitDetailModal`, `CircuitCard`.
+
 ### Experiments
 - `src/app/experiments/page.tsx` - Experiment builder + live run logs.
 - `src/components/experiments/HeatmapViewer.tsx` - Heatmap rendering.
@@ -57,4 +63,3 @@ Notes:
 These exist in `src/components/` but are not referenced by any current route:
 - `Header.tsx`, `Sidebar.tsx`, `MainContent.tsx`
 - `DimensionGroupsTable.tsx`, `GateCompositionsTable.tsx`, `RepresentativesTable.tsx`, `CircuitDetails.tsx`
-

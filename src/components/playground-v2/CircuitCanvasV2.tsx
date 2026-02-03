@@ -491,8 +491,13 @@ export default function CircuitCanvasV2({
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0 || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const scrollLeft = containerRef.current.scrollLeft;
+    const scrollTop = containerRef.current.scrollTop;
+    
+    // Add scroll offset to coordinates
+    const x = e.clientX - rect.left + scrollLeft;
+    const y = e.clientY - rect.top + scrollTop;
+    
     // Only start marquee if not clicking on a gate
     if ((e.target as HTMLElement).closest('[data-gate]')) return;
     setMarquee({ startX: x, startY: y, endX: x, endY: y });
@@ -502,9 +507,16 @@ export default function CircuitCanvasV2({
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isMarqueeSelecting || !marquee || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
+    const scrollLeft = containerRef.current.scrollLeft;
+    const scrollTop = containerRef.current.scrollTop;
+    
     setMarquee((prev) =>
       prev
-        ? { ...prev, endX: e.clientX - rect.left, endY: e.clientY - rect.top }
+        ? { 
+            ...prev, 
+            endX: e.clientX - rect.left + scrollLeft, 
+            endY: e.clientY - rect.top + scrollTop 
+          }
         : null
     );
   };

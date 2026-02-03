@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 
@@ -85,6 +86,9 @@ function getTopologicalOrder(gates: PlaygroundGate[]): PlaygroundGate[] {
 }
 
 export default function PlaygroundPro() {
+  // URL params for loading circuits via link
+  const searchParams = useSearchParams();
+
   // Multi-tab state
   const [tabs, setTabs] = useState<CircuitTabData[]>([
     { id: 'tab-1', name: 'Circuit 1', isModified: false },
@@ -649,12 +653,24 @@ export default function PlaygroundPro() {
     const { gates, detectedWidth } = parseGateString(circuitStr);
     // Use detected width if it's larger than the hint, or if hint is small default
     const finalWidth = Math.max(detectedWidth, wiresHint, MIN_WIDTH);
+    // Use max step value (not gate count) to properly size the circuit
+    const maxStep = gates.length > 0 ? Math.max(...gates.map(g => g.step)) : 0;
     setCircuit(() => ({
       width: finalWidth,
-      length: Math.max(gates.length + 2, INITIAL_LENGTH),
+      length: Math.max(maxStep + 3, INITIAL_LENGTH),
       gates,
     }));
   }, [parseGateString, setCircuit]);
+
+  // Load circuit from URL params on mount (e.g., ?gates=012;103;...)
+  useEffect(() => {
+    const gatesParam = searchParams.get('gates');
+    const widthParam = searchParams.get('width');
+    if (gatesParam) {
+      const width = widthParam ? parseInt(widthParam, 10) : 8;
+      handleLoadCircuit(gatesParam, width);
+    }
+  }, [searchParams, handleLoadCircuit]);
 
   // Load latest identity from API
   const handleLoadLatestIdentity = useCallback(async () => {
@@ -787,16 +803,21 @@ export default function PlaygroundPro() {
   const handleRotate = useCallback(
     (n: number) => {
       if (circuit.gates.length === 0) return;
-      const len = circuit.gates.length;
-      setCircuit((prev) => ({
-        ...prev,
-        gates: prev.gates.map((g) => ({
-          ...g,
-          step: (((g.step + n) % len) + len) % len, // Handle negative rotation
-        })),
-      }));
+      setCircuit((prev) => {
+        // Use actual max step to ensure proper wrapping even if circuit.length is stale
+        const maxStep = Math.max(...prev.gates.map((g) => g.step));
+        const len = Math.max(prev.length, maxStep + 1);
+        return {
+          ...prev,
+          length: len, // Ensure circuit length matches actual gate extent
+          gates: prev.gates.map((g) => ({
+            ...g,
+            step: (((g.step + n) % len) + len) % len, // Handle negative rotation
+          })),
+        };
+      });
     },
-    [circuit.gates.length, setCircuit]
+    [setCircuit]
   );
 
   // Reverse: reverse gate order
@@ -890,15 +911,18 @@ export default function PlaygroundPro() {
         : clipboard.gates;
       const nextStep = Math.max(0, ...circuit.gates.map((g) => g.step)) + 1;
       const minStep = Math.min(...gatesToPaste.map((g) => g.step));
+      const maxStep = Math.max(...gatesToPaste.map((g) => g.step));
       const newGates = gatesToPaste.map((g, i) => ({
         ...g,
         id: `pasted-${Date.now()}-${i}`,
         step: g.step - minStep + nextStep,
       }));
+      // Use the actual step range of pasted gates, not just the count
+      const pastedMaxStep = nextStep + (maxStep - minStep);
       setCircuit((prev) => ({
         ...prev,
         gates: [...prev.gates, ...newGates],
-        length: Math.max(prev.length, nextStep + gatesToPaste.length + 2),
+        length: Math.max(prev.length, pastedMaxStep + 3),
       }));
       setSelectedGateIds(() => new Set(newGates.map((g) => g.id)));
     },
@@ -1080,6 +1104,7 @@ export default function PlaygroundPro() {
             selectedGateIds={selectedGateIds}
             isTooManyGates={isTooManyGates}
             isTooManyWires={isTooManyWires}
+            onLoadCircuit={handleLoadCircuit}
           />
         </div>
 

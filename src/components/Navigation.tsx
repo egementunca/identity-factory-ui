@@ -11,6 +11,7 @@ import {
   Search,
   Zap,
   FlaskConical,
+  Shuffle,
 } from 'lucide-react';
 
 interface NavItem {
@@ -46,6 +47,12 @@ const navItems: NavItem[] = [
     description: 'Explore All Circuits',
   },
   {
+    label: 'Wire Shuffler',
+    href: '/wire-shuffler',
+    icon: <Shuffle size={20} />,
+    description: 'Wire permutation explorer',
+  },
+  {
     label: 'Playground Pro',
     href: '/playground-v2',
     icon: <Puzzle size={20} />,
@@ -56,6 +63,12 @@ const navItems: NavItem[] = [
     href: '/eca57-explorer',
     icon: <Search size={20} />,
     description: 'Explore ECA57 Identities',
+  },
+  {
+    label: 'Skeleton Explorer',
+    href: '/skeleton-explorer',
+    icon: <Zap size={20} />,
+    description: 'Skeleton Identity Circuits',
   },
 ];
 

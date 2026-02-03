@@ -10,7 +10,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import SkeletonGraph from '../SkeletonGraph';
-import { PlaygroundCircuit, PlaygroundGate } from '@/types/api';
+import { PlaygroundCircuit, PlaygroundGate, DatabaseSearchResult, DatabaseSearchResponse, DatabaseSource } from '@/types/api';
 
 type PanelTab = 'skeleton' | 'database' | 'analysis';
 
@@ -34,6 +34,8 @@ interface RightPanelProps {
   // Performance flags
   isTooManyGates?: boolean;
   isTooManyWires?: boolean;
+  // Load circuit callback
+  onLoadCircuit?: (circuitStr: string, width: number) => void;
 }
 
 export default function RightPanel({
@@ -50,12 +52,17 @@ export default function RightPanel({
   selectedGateIds,
   isTooManyGates = false,
   isTooManyWires = false,
+  onLoadCircuit,
 }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState<PanelTab>('skeleton');
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<DatabaseSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showLocalSkeleton, setShowLocalSkeleton] = useState(true);
+  const [selectedSources, setSelectedSources] = useState<DatabaseSource[]>(['skeleton', 'eca57-lmdb', 'sqlite']);
+  const [loadingCircuitId, setLoadingCircuitId] = useState<string | null>(null);
+
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 
   // Resizable panel state
   const [panelWidth, setPanelWidth] = useState(320);
@@ -66,16 +73,65 @@ export default function RightPanel({
     if (!searchQuery.trim()) return;
     setIsSearching(true);
     try {
-      // TODO: Implement actual API call to ECA57 database
-      // For now, just simulate
-      await new Promise((r) => setTimeout(r, 500));
-      setSearchResults([
-        { id: '1', gates: 4, width: 3, isIdentity: true },
-        { id: '2', gates: 6, width: 4, isIdentity: false },
-      ]);
+      const params = new URLSearchParams();
+      // Parse "4w 8g" format
+      const widthMatch = searchQuery.match(/(\d+)w/i);
+      const gatesMatch = searchQuery.match(/(\d+)g/i);
+      if (widthMatch) params.set('width', widthMatch[1]);
+      if (gatesMatch) params.set('gate_count', gatesMatch[1]);
+      params.set('limit', '30');
+      selectedSources.forEach(s => params.append('sources', s));
+
+      const res = await fetch(`${API_BASE}/api/v1/search/circuits?${params}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: DatabaseSearchResponse = await res.json();
+      setSearchResults(data.results);
+    } catch (err) {
+      console.error('Search failed:', err);
+      setSearchResults([]);
     } finally {
       setIsSearching(false);
     }
+  };
+
+  const handleLoadToCanvas = (result: DatabaseSearchResult) => {
+    if (!onLoadCircuit) return;
+    setLoadingCircuitId(result.id);
+    try {
+      onLoadCircuit(result.gateString, result.width);
+    } finally {
+      setLoadingCircuitId(null);
+    }
+  };
+
+  const handleSearchThisCircuit = async () => {
+    setIsSearching(true);
+    try {
+      const params = new URLSearchParams({
+        width: circuit.width.toString(),
+        gate_count: circuit.gates.length.toString(),
+        limit: '20',
+      });
+      selectedSources.forEach(s => params.append('sources', s));
+
+      const res = await fetch(`${API_BASE}/api/v1/search/circuits?${params}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: DatabaseSearchResponse = await res.json();
+      setSearchResults(data.results);
+    } catch (err) {
+      console.error('Search failed:', err);
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const toggleSource = (source: DatabaseSource) => {
+    setSelectedSources(prev =>
+      prev.includes(source)
+        ? prev.filter(s => s !== source)
+        : [...prev, source]
+    );
   };
 
   // Resize handlers
@@ -267,7 +323,11 @@ export default function RightPanel({
 
             {/* Quick actions */}
             <div className="flex gap-1">
-              <button className="flex-1 px-2 py-1 text-[10px] text-[var(--text-secondary)] border border-[var(--border-subtle)] rounded hover:border-[var(--border-default)]">
+              <button
+                onClick={handleSearchThisCircuit}
+                disabled={isSearching}
+                className="flex-1 px-2 py-1 text-[10px] text-[var(--text-secondary)] border border-[var(--border-subtle)] rounded hover:border-[var(--border-default)] disabled:opacity-50"
+              >
                 This Circuit
               </button>
               <button className="flex-1 px-2 py-1 text-[10px] text-[var(--text-secondary)] border border-[var(--border-subtle)] rounded hover:border-[var(--border-default)]">
@@ -275,29 +335,59 @@ export default function RightPanel({
               </button>
             </div>
 
+            {/* Source filters */}
+            <div className="flex flex-wrap gap-1 mt-2">
+              {(['skeleton', 'eca57-lmdb', 'sqlite'] as DatabaseSource[]).map((source) => (
+                <button
+                  key={source}
+                  onClick={() => toggleSource(source)}
+                  className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${
+                    selectedSources.includes(source)
+                      ? 'border-[var(--accent-primary)] bg-[var(--accent-muted)] text-[var(--accent-primary)]'
+                      : 'border-[var(--border-subtle)] text-[var(--text-muted)] hover:border-[var(--border-default)]'
+                  }`}
+                >
+                  {source === 'eca57-lmdb' ? 'ECA57' : source === 'skeleton' ? 'Skeleton' : 'SQLite'}
+                </button>
+              ))}
+            </div>
+
             {/* Results */}
             <div className="space-y-1 mt-2">
               {searchResults.length === 0 ? (
                 <div className="text-[10px] text-[var(--text-muted)] text-center py-4">
-                  No results. Try searching for circuits.
+                  No results. Try searching for circuits (e.g. "4w 8g").
                 </div>
               ) : (
                 searchResults.map((result) => (
                   <div
                     key={result.id}
-                    className="flex items-center justify-between p-2 rounded bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] hover:border-[var(--border-default)] cursor-pointer"
+                    className="flex items-center justify-between p-2 rounded bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] hover:border-[var(--border-default)]"
                   >
-                    <div className="text-xs">
+                    <div className="text-xs flex-1">
                       <div className="text-[var(--text-primary)]">
-                        #{result.id} • {result.width}w × {result.gates}g
+                        {result.width}w × {result.gateCount}g
                       </div>
-                      <div
-                        className={`text-[10px] ${result.isIdentity ? 'text-[var(--status-identity)]' : 'text-[var(--text-muted)]'}`}
-                      >
-                        {result.isIdentity ? 'Identity' : 'Non-identity'}
+                      <div className="flex items-center gap-2 text-[10px]">
+                        <span className={`px-1 rounded ${
+                          result.source === 'skeleton' ? 'bg-purple-900/30 text-purple-300' :
+                          result.source === 'eca57-lmdb' ? 'bg-blue-900/30 text-blue-300' :
+                          'bg-green-900/30 text-green-300'
+                        }`}>
+                          {result.source === 'eca57-lmdb' ? 'ECA57' : result.source === 'skeleton' ? 'Skeleton' : 'SQLite'}
+                        </span>
+                        {result.isIdentity && (
+                          <span className="text-[var(--status-identity)]">Identity</span>
+                        )}
                       </div>
                     </div>
-                    <ExternalLink className="w-3 h-3 text-[var(--text-muted)]" />
+                    <button
+                      onClick={() => handleLoadToCanvas(result)}
+                      disabled={loadingCircuitId === result.id || !onLoadCircuit}
+                      className="px-2 py-1 text-[10px] bg-[var(--accent-primary)] text-white rounded hover:opacity-80 disabled:opacity-50 transition-opacity"
+                    >
+                      {loadingCircuitId === result.id ? '...' : 'Load'}
+                    </button>
                   </div>
                 ))
               )}

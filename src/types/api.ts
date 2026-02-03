@@ -145,3 +145,51 @@ export interface GatePlacement {
   controls: number[];
   suggestedQubits?: number[]; // for smart placement
 }
+
+// Database search types for unified circuit search
+export type DatabaseSource = 'sqlite' | 'eca57-lmdb' | 'skeleton';
+
+export interface DatabaseSearchFilters {
+  width?: number;
+  widthRange?: [number, number];
+  gateCount?: number;
+  gateCountRange?: [number, number];
+  sources?: DatabaseSource[];
+  isIdentityOnly?: boolean;
+}
+
+export interface DatabaseSearchResult {
+  id: string;           // Unique: "{source}:{width}:{index}"
+  source: DatabaseSource;
+  width: number;
+  gateCount: number;
+  gates: number[][];    // [[target, ctrl1, ctrl2], ...]
+  gateString: string;   // Ready for handleLoadCircuit
+  isIdentity: boolean;
+  isRepresentative?: boolean;
+  equivalenceClassSize?: number;
+  taxonomy?: string;    // For skeleton circuits only
+}
+
+export interface DatabaseSearchResponse {
+  results: DatabaseSearchResult[];
+  total: number;
+  sourcesQueried: DatabaseSource[];
+  sourcesStats: Record<string, number>;
+}
+
+export interface DatabaseStats {
+  sqlite?: {
+    totalCircuits: number;
+    configurations: Array<{width: number; gateCount: number; count: number}>;
+  };
+  eca57Lmdb?: {
+    totalCircuits: number;
+    configurations: Array<{width: number; gateCount: number; count: number}>;
+  };
+  skeleton?: {
+    totalCircuits: number;
+    widths: number[];
+    taxonomiesPerWidth: Record<number, number>;
+  };
+}
