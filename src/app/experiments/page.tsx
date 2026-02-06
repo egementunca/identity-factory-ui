@@ -20,8 +20,9 @@ import InfoTooltip from '@/components/InfoTooltip';
 import HeatmapViewer from '@/components/experiments/HeatmapViewer';
 import AlignmentViewer from '@/components/experiments/AlignmentViewer';
 import ExperimentHistory from '@/components/experiments/ExperimentHistory';
+import { API_HOST } from '@/lib/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE = API_HOST;
 
 import {
   ObfuscationParams,

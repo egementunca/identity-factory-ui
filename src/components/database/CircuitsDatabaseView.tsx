@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { API_BASE } from '@/lib/api';
 
 interface Circuit {
   id: number;
@@ -30,7 +31,7 @@ export default function CircuitsDatabaseView() {
 
   const loadStats = async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/v1/stats');
+      const res = await fetch(`${API_BASE}/stats`);
       if (res.ok) {
         const data = await res.json();
         setStats(data);
@@ -44,8 +45,8 @@ export default function CircuitsDatabaseView() {
     setLoading(true);
     try {
       const url = width
-        ? `http://localhost:8000/api/v1/circuits?width=${width}&limit=100`
-        : 'http://localhost:8000/api/v1/circuits?limit=100';
+        ? `${API_BASE}/circuits?width=${width}&limit=100`
+        : `${API_BASE}/circuits?limit=100`;
 
       const res = await fetch(url);
       if (res.ok) {

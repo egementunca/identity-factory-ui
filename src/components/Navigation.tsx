@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -76,105 +76,31 @@ export default function Navigation() {
   const pathname = usePathname();
 
   return (
-    <nav className="main-navigation">
-      <div className="nav-brand">
-        <span className="brand-icon">⚡</span>
-        <span className="brand-text">Gate 57 Factory</span>
+    <nav className="flex items-center justify-between px-6 py-3 bg-gradient-to-br from-slate-900/[0.98] to-slate-950/[0.99] border-b border-slate-700/20 sticky top-0 z-50 backdrop-blur-md">
+      <div className="flex items-center gap-2.5">
+        <span className="text-2xl">⚡</span>
+        <span className="text-lg font-bold bg-gradient-to-br from-white to-blue-200/90 bg-clip-text text-transparent">
+          Gate 57 Factory
+        </span>
       </div>
 
-      <div className="nav-links">
+      <div className="flex gap-2">
         {navItems.map((item) => (
           <Link
             key={item.href}
             href={item.href}
-            className={`nav-link text-white ${pathname === item.href ? 'active' : ''}`}
-            style={{ color: '#ffffff', opacity: 1 }}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-white text-sm font-medium transition-all border border-transparent
+              hover:bg-blue-500/10
+              ${pathname === item.href
+                ? 'bg-blue-500/20 border-blue-500/40'
+                : ''
+              }`}
           >
             {item.icon}
-            <span className="nav-label">{item.label}</span>
+            <span className="hidden md:block">{item.label}</span>
           </Link>
         ))}
       </div>
-
-      <style jsx>{`
-        .main-navigation {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 12px 24px;
-          background: linear-gradient(
-            135deg,
-            rgba(20, 20, 35, 0.98),
-            rgba(15, 15, 25, 0.99)
-          );
-          border-bottom: 1px solid rgba(100, 100, 150, 0.2);
-          position: sticky;
-          top: 0;
-          z-index: 100;
-          backdrop-filter: blur(12px);
-        }
-
-        .nav-brand {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-
-        .brand-icon {
-          font-size: 1.5rem;
-        }
-
-        .brand-text {
-          font-size: 1.1rem;
-          font-weight: 700;
-          background: linear-gradient(135deg, #fff, rgba(150, 200, 255, 0.9));
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-        }
-
-        .nav-links {
-          display: flex;
-          gap: 8px;
-        }
-
-        .nav-link {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 10px 16px;
-          border-radius: 10px;
-          color: #ffffff;
-          text-decoration: none;
-          font-size: 0.9rem;
-          font-weight: 500;
-          transition: all 0.2s;
-          border: 1px solid transparent;
-        }
-
-        .nav-link:hover {
-          background: rgba(100, 150, 255, 0.1);
-          color: #fff;
-        }
-
-        .nav-link.active {
-          background: rgba(100, 150, 255, 0.2);
-          color: #fff;
-          border-color: rgba(100, 150, 255, 0.4);
-        }
-
-        .nav-label {
-          display: block;
-        }
-
-        @media (max-width: 768px) {
-          .nav-label {
-            display: none;
-          }
-          .nav-link {
-            padding: 10px 12px;
-          }
-        }
-      `}</style>
     </nav>
   );
 }

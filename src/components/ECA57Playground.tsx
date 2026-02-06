@@ -3,73 +3,20 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
-import GateToolbox from './GateToolbox';
 import CircuitCanvas from './CircuitCanvas';
 import SkeletonGraph from './SkeletonGraph';
 import IdentityBrowser from './IdentityBrowser';
-import { PlaygroundCircuit, PlaygroundGate, LiveMetrics } from '@/types/api';
+import { PlaygroundCircuit, PlaygroundGate } from '@/types/api';
 import { Plus, Minus, ArrowRightLeft, FolderOpen, Zap } from 'lucide-react';
+import { API_HOST } from '@/lib/api';
+import {
+  getTopologicalOrder,
+  parseGateString,
+  computePermutation,
+  computeReducedGates,
+} from '@/lib/circuitUtils';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
-
-// Check if two gates collide (can't swap)
-// Gates collide iff one's target is in the other's controls
-// Note: Same targets DO commute for ECA57 gates!
-function gatesCollide(g1: PlaygroundGate, g2: PlaygroundGate): boolean {
-  return g2.controls.includes(g1.target) || g1.controls.includes(g2.target);
-}
-
-// Get topological levels from collision edges
-function getTopologicalOrder(gates: PlaygroundGate[]): PlaygroundGate[] {
-  const n = gates.length;
-  if (n === 0) return [];
-
-  // Build collision edges
-  const edges: [number, number][] = [];
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      if (gatesCollide(gates[i], gates[j])) {
-        edges.push([i, j]);
-      }
-    }
-  }
-
-  // Calculate in-degrees
-  const inDegree = new Array(n).fill(0);
-  const adjList: number[][] = Array.from({ length: n }, () => []);
-  for (const [src, dst] of edges) {
-    adjList[src].push(dst);
-    inDegree[dst]++;
-  }
-
-  // Kahn's algorithm for topological sort
-  const result: number[] = [];
-  const queue: number[] = [];
-
-  for (let i = 0; i < n; i++) {
-    if (inDegree[i] === 0) queue.push(i);
-  }
-
-  while (queue.length > 0) {
-    // Sort by target (highest first) within same level
-    queue.sort((a, b) => gates[b].target - gates[a].target);
-    const node = queue.shift()!;
-    result.push(node);
-
-    for (const neighbor of adjList[node]) {
-      inDegree[neighbor]--;
-      if (inDegree[neighbor] === 0) {
-        queue.push(neighbor);
-      }
-    }
-  }
-
-  // Return reordered gates with new steps
-  return result.map((oldIdx, newStep) => ({
-    ...gates[oldIdx],
-    step: newStep,
-  }));
-}
+const API_BASE = API_HOST;
 
 const INITIAL_WIDTH = 4;
 const INITIAL_LENGTH = 12;
@@ -119,83 +66,10 @@ export default function ECA57Playground() {
   const [isLoadingIdentity, setIsLoadingIdentity] = useState(false);
 
   // Calculate live permutation and cycle notation
-  const { permutation, isIdentity, cycleNotation } = useMemo(() => {
-    const width = circuit.width;
-    const numStates = 1 << width;
-    let perm = Array.from({ length: numStates }, (_, i) => i);
-
-    const sortedGates = [...circuit.gates].sort((a, b) => a.step - b.step);
-
-    for (const gate of sortedGates) {
-      const newPerm = [...perm];
-      for (let state = 0; state < numStates; state++) {
-        let newState = perm[state];
-
-        switch (gate.type) {
-          case 'X':
-            newState ^= 1 << gate.target;
-            break;
-          case 'CX':
-            if (newState & (1 << gate.controls[0])) {
-              newState ^= 1 << gate.target;
-            }
-            break;
-          case 'CCX':
-            if (gate.controls.every((c) => newState & (1 << c))) {
-              newState ^= 1 << gate.target;
-            }
-            break;
-          case 'ECA57':
-            const ctrl1Set = !!(newState & (1 << gate.controls[0]));
-            const ctrl2Set = !!(newState & (1 << gate.controls[1]));
-            if (ctrl1Set || !ctrl2Set) {
-              newState ^= 1 << gate.target;
-            }
-            break;
-        }
-        newPerm[state] = newState;
-      }
-      perm = newPerm;
-    }
-
-    // Compute cycle notation
-    const visited = new Array(numStates).fill(false);
-    const cycles: number[][] = [];
-
-    for (let start = 0; start < numStates; start++) {
-      if (visited[start]) continue;
-
-      const cycle: number[] = [];
-      let curr = start;
-
-      while (!visited[curr]) {
-        visited[curr] = true;
-        cycle.push(curr);
-        curr = perm[curr];
-      }
-
-      // Only include non-trivial cycles (length > 1)
-      if (cycle.length > 1) {
-        cycles.push(cycle);
-      }
-    }
-
-    // Format cycle notation string
-    let cycleStr = '';
-    if (cycles.length === 0) {
-      cycleStr = '()'; // Identity
-    } else {
-      for (const cycle of cycles) {
-        cycleStr += '(' + cycle.join(' ') + ')';
-      }
-    }
-
-    return {
-      permutation: perm,
-      isIdentity: perm.every((val, idx) => val === idx),
-      cycleNotation: cycleStr,
-    };
-  }, [circuit]);
+  const { permutation, isIdentity, cycleNotation } = useMemo(
+    () => computePermutation(circuit),
+    [circuit]
+  );
 
   // Gate placement - find next available step
   const findNextAvailableStep = useCallback(
@@ -353,34 +227,6 @@ export default function ECA57Playground() {
     [placementMode, selectedTool, pendingPlacement, handleGateDrop]
   );
 
-  // Compute reduced-wire version of selected gates
-  const computeReducedGates = useCallback(
-    (gates: PlaygroundGate[]): { gates: PlaygroundGate[]; width: number } => {
-      if (gates.length === 0) return { gates: [], width: 0 };
-
-      // Find all unique wires used
-      const usedWires = new Set<number>();
-      gates.forEach((g) => {
-        usedWires.add(g.target);
-        g.controls.forEach((c) => usedWires.add(c));
-      });
-
-      // Create mapping from original wire to reduced wire
-      const sortedWires = Array.from(usedWires).sort((a, b) => a - b);
-      const wireMap = new Map<number, number>();
-      sortedWires.forEach((wire, idx) => wireMap.set(wire, idx));
-
-      // Remap gates
-      const reducedGates = gates.map((g) => ({
-        ...g,
-        target: wireMap.get(g.target)!,
-        controls: g.controls.map((c) => wireMap.get(c)!),
-      }));
-
-      return { gates: reducedGates, width: sortedWires.length };
-    },
-    []
-  );
 
   // Selection handlers
   const handleGateSelect = useCallback((gateId: string, shiftKey: boolean) => {
@@ -426,7 +272,7 @@ export default function ECA57Playground() {
       sourceWidth: circuit.width,
       reducedWidth,
     });
-  }, [selectedGateIds, circuit.gates, circuit.width, computeReducedGates]);
+  }, [selectedGateIds, circuit.gates, circuit.width]);
 
   const handleCut = useCallback(() => {
     handleCopy();
@@ -740,59 +586,6 @@ export default function ECA57Playground() {
     [circuit.gates]
   );
 
-  // Parse .gate format (e.g., "012;123;234;") into PlaygroundGates
-  const parseGateString = useCallback((gateStr: string): { gates: PlaygroundGate[], detectedWidth: number } => {
-    const gateTokens = gateStr.split(';').filter(s => s.trim());
-    const gates: PlaygroundGate[] = [];
-    
-    // Character to wire index mapping - must match Rust's wire_to_char exactly
-    const charToWire = (c: string): number => {
-      const code = c.charCodeAt(0);
-      // 0-9 -> wires 0-9
-      if (code >= 48 && code <= 57) return code - 48;
-      // a-z -> wires 10-35
-      if (code >= 97 && code <= 122) return code - 97 + 10;
-      // A-Z -> wires 36-61
-      if (code >= 65 && code <= 90) return code - 65 + 36;
-      // Special characters for wires 62+
-      const specialChars: Record<string, number> = {
-        '!': 62, '@': 63, '#': 64, '$': 65, '%': 66,
-        '^': 67, '&': 68, '*': 69, '(': 70, ')': 71,
-        '-': 72, '_': 73, '=': 74, '+': 75, '[': 76,
-        ']': 77, '{': 78, '}': 79, '<': 80, '>': 81, '?': 82
-      };
-      return specialChars[c] ?? 0;
-    };
-
-    // First pass: detect max wire index used
-    let maxWire = 0;
-    gateTokens.forEach((token) => {
-      if (token.length >= 3) {
-        maxWire = Math.max(maxWire, charToWire(token[0]), charToWire(token[1]), charToWire(token[2]));
-      }
-    });
-    const detectedWidth = maxWire + 1; // Width is max wire index + 1
-
-    // Second pass: create gates
-    gateTokens.forEach((token, idx) => {
-      if (token.length >= 3) {
-        const target = charToWire(token[0]);
-        const ctrl1 = charToWire(token[1]);
-        const ctrl2 = charToWire(token[2]);
-        
-        gates.push({
-          id: `loaded-${Date.now()}-${idx}`,
-          type: 'ECA57',
-          step: idx,
-          target,
-          controls: [ctrl1, ctrl2],
-        });
-      }
-    });
-    
-    return { gates, detectedWidth };
-  }, []);
-
   // Load circuit from string (used by IdentityBrowser)
   const handleLoadCircuit = useCallback((circuitStr: string, wiresHint: number) => {
     const { gates, detectedWidth } = parseGateString(circuitStr);
@@ -803,7 +596,7 @@ export default function ECA57Playground() {
       length: Math.max(gates.length + 2, INITIAL_LENGTH),
       gates,
     });
-  }, [parseGateString]);
+  }, []);
 
   // Load latest identity from API
   const handleLoadLatestIdentity = useCallback(async () => {

@@ -2,9 +2,16 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Navigation from '@/components/Navigation';
-import { RefreshCw, Shuffle, Activity, Hash, Layers } from 'lucide-react';
-
-const API_BASE = 'http://localhost:8000/api/v1';
+import { RefreshCw, Shuffle, Activity, Hash, Layers, Zap, Play, Loader2 } from 'lucide-react';
+import {
+  API_BASE,
+  generateWaksmanCircuit,
+  getWaksmanStats,
+  getWaksmanCircuits,
+  generateWaksmanBatch,
+  WaksmanCircuit,
+  WaksmanStatsResponse,
+} from '@/lib/api';
 
 interface WireShufflerStats {
   total_permutations: number;
@@ -191,6 +198,21 @@ export default function WireShufflerPage() {
     'perms'
   );
 
+  // Waksman generator state
+  const [waksmanWidth, setWaksmanWidth] = useState<number>(8);
+  const [waksmanPermType, setWaksmanPermType] = useState<'random' | 'reverse' | 'shift' | 'identity' | 'custom'>('random');
+  const [waksmanCustomPerm, setWaksmanCustomPerm] = useState<string>('');
+  const [waksmanShiftAmount, setWaksmanShiftAmount] = useState<number>(1);
+  const [waksmanGenerating, setWaksmanGenerating] = useState(false);
+  const [waksmanResult, setWaksmanResult] = useState<WaksmanCircuit | null>(null);
+  const [waksmanError, setWaksmanError] = useState<string | null>(null);
+  const [waksmanStats, setWaksmanStats] = useState<WaksmanStatsResponse | null>(null);
+  const [waksmanCircuits, setWaksmanCircuits] = useState<WaksmanCircuit[]>([]);
+  const [waksmanBatchCount, setWaksmanBatchCount] = useState<number>(10);
+  const [waksmanBatchGenerating, setWaksmanBatchGenerating] = useState(false);
+  const [waksmanObfuscate, setWaksmanObfuscate] = useState<boolean>(false);
+  const [waksmanMinIdentityGates, setWaksmanMinIdentityGates] = useState<number>(36);
+
   const fetchStats = async () => {
     const res = await fetch(`${API_BASE}/wire-shuffler/stats`);
     if (res.ok) {
@@ -292,8 +314,89 @@ export default function WireShufflerPage() {
     }
   };
 
+  // Waksman functions
+  const fetchWaksmanStats = async () => {
+    try {
+      const data = await getWaksmanStats();
+      setWaksmanStats(data);
+    } catch (e) {
+      console.error('Failed to fetch Waksman stats:', e);
+    }
+  };
+
+  const fetchWaksmanCircuits = async (w?: number) => {
+    try {
+      const data = await getWaksmanCircuits(w, 20);
+      setWaksmanCircuits(data);
+    } catch (e) {
+      console.error('Failed to fetch Waksman circuits:', e);
+    }
+  };
+
+  const handleGenerateWaksman = async () => {
+    setWaksmanGenerating(true);
+    setWaksmanError(null);
+    setWaksmanResult(null);
+
+    try {
+      let perm: number[] | undefined;
+      let permType: 'specific' | 'random' | 'reverse' | 'shift' | 'identity' = waksmanPermType === 'custom' ? 'specific' : waksmanPermType;
+
+      if (waksmanPermType === 'custom') {
+        const parsed = waksmanCustomPerm.split(',').map(s => parseInt(s.trim(), 10));
+        if (parsed.length !== waksmanWidth || parsed.some(isNaN)) {
+          throw new Error(`Invalid permutation. Expected ${waksmanWidth} comma-separated integers.`);
+        }
+        if ([...parsed].sort((a, b) => a - b).join(',') !== [...Array(waksmanWidth).keys()].join(',')) {
+          throw new Error('Invalid permutation. Must be a permutation of 0 to width-1.');
+        }
+        perm = parsed;
+      }
+
+      const result = await generateWaksmanCircuit({
+        width: waksmanWidth,
+        permutation: perm,
+        permutation_type: permType,
+        shift_amount: waksmanPermType === 'shift' ? waksmanShiftAmount : undefined,
+        store_in_db: true,
+        obfuscate: waksmanObfuscate,
+        min_identity_gates: waksmanObfuscate ? waksmanMinIdentityGates : undefined,
+      });
+
+      setWaksmanResult(result);
+      fetchWaksmanStats();
+      fetchWaksmanCircuits(waksmanWidth);
+    } catch (e: unknown) {
+      setWaksmanError(e instanceof Error ? e.message : 'Generation failed');
+    } finally {
+      setWaksmanGenerating(false);
+    }
+  };
+
+  const handleGenerateWaksmanBatch = async () => {
+    setWaksmanBatchGenerating(true);
+    setWaksmanError(null);
+
+    try {
+      const result = await generateWaksmanBatch({
+        width: waksmanWidth,
+        count: waksmanBatchCount,
+        store_in_db: true,
+      });
+      setWaksmanError(null);
+      alert(`Generated ${result.circuits_generated} Waksman circuits!`);
+      fetchWaksmanStats();
+      fetchWaksmanCircuits(waksmanWidth);
+    } catch (e: unknown) {
+      setWaksmanError(e instanceof Error ? e.message : 'Batch generation failed');
+    } finally {
+      setWaksmanBatchGenerating(false);
+    }
+  };
+
   useEffect(() => {
     fetchStats();
+    fetchWaksmanStats();
   }, []);
 
   useEffect(() => {
@@ -1127,6 +1230,247 @@ export default function WireShufflerPage() {
                 </tbody>
               </table>
             )}
+          </div>
+        </section>
+
+        {/* Waksman Network Generator Section */}
+        <section className="glass-panel-dark p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <Zap size={16} className="text-yellow-400" />
+                Waksman Network Generator
+              </div>
+              <div className="text-xs text-slate-400 mt-1">
+                Generate O(n log n) permutation circuits for large widths (8, 16, 32, 64).
+                Uses swap-based networks with 6-gate ECA57 swap macros.
+              </div>
+            </div>
+            <div className="text-xs text-slate-400">
+              Total: {waksmanStats?.total_circuits ?? 0} circuits
+            </div>
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-4">
+            {/* Generator controls */}
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-3 items-center">
+                <div className="space-y-1">
+                  <div className="text-xs text-slate-400">Width</div>
+                  <select
+                    className="bg-slate-900/60 border border-slate-700/60 rounded px-3 py-1.5 text-sm"
+                    value={waksmanWidth}
+                    onChange={(e) => {
+                      setWaksmanWidth(parseInt(e.target.value, 10));
+                      setWaksmanResult(null);
+                    }}
+                  >
+                    {[4, 8, 16, 32, 64, 128].map((w) => (
+                      <option key={w} value={w}>
+                        {w} wires
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-xs text-slate-400">Permutation Type</div>
+                  <select
+                    className="bg-slate-900/60 border border-slate-700/60 rounded px-3 py-1.5 text-sm"
+                    value={waksmanPermType}
+                    onChange={(e) => setWaksmanPermType(e.target.value as typeof waksmanPermType)}
+                  >
+                    <option value="random">Random</option>
+                    <option value="reverse">Reverse</option>
+                    <option value="shift">Cyclic Shift</option>
+                    <option value="identity">Identity</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                </div>
+                {waksmanPermType === 'shift' && (
+                  <div className="space-y-1">
+                    <div className="text-xs text-slate-400">Shift Amount</div>
+                    <input
+                      type="number"
+                      min={1}
+                      max={waksmanWidth - 1}
+                      className="w-20 bg-slate-900/60 border border-slate-700/60 rounded px-2 py-1.5 text-sm"
+                      value={waksmanShiftAmount}
+                      onChange={(e) => setWaksmanShiftAmount(parseInt(e.target.value, 10) || 1)}
+                    />
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <div className="text-xs text-slate-400">Obfuscate</div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 rounded border-slate-700/60 bg-slate-900/60 text-indigo-500 focus:ring-indigo-500/30"
+                      checked={waksmanObfuscate}
+                      onChange={(e) => setWaksmanObfuscate(e.target.checked)}
+                    />
+                    <span className="text-xs text-slate-300">Fill identity slots</span>
+                  </label>
+                </div>
+                {waksmanObfuscate && (
+                  <div className="space-y-1">
+                    <div className="text-xs text-slate-400">Min Identity Gates</div>
+                    <select
+                      className="bg-slate-900/60 border border-slate-700/60 rounded px-3 py-1.5 text-sm"
+                      value={waksmanMinIdentityGates}
+                      onChange={(e) => setWaksmanMinIdentityGates(parseInt(e.target.value, 10))}
+                    >
+                      <option value={12}>12 (short)</option>
+                      <option value={24}>24 (medium)</option>
+                      <option value={36}>36 (long)</option>
+                      <option value={48}>48 (very long)</option>
+                      <option value={60}>60 (extra long)</option>
+                      <option value={72}>72 (maximum)</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {waksmanPermType === 'custom' && (
+                <div className="space-y-1">
+                  <div className="text-xs text-slate-400">Custom Permutation (comma-separated)</div>
+                  <input
+                    type="text"
+                    className="w-full bg-slate-900/60 border border-slate-700/60 rounded px-3 py-1.5 text-sm font-mono"
+                    placeholder={`e.g., ${[...Array(waksmanWidth).keys()].reverse().join(', ')}`}
+                    value={waksmanCustomPerm}
+                    onChange={(e) => setWaksmanCustomPerm(e.target.value)}
+                  />
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-indigo-500/30 border border-indigo-400/60 hover:bg-indigo-500/40 disabled:opacity-50"
+                  onClick={handleGenerateWaksman}
+                  disabled={waksmanGenerating}
+                >
+                  {waksmanGenerating ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Play size={16} />
+                  )}
+                  Generate Single
+                </button>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={1000}
+                    className="w-20 bg-slate-900/60 border border-slate-700/60 rounded px-2 py-1.5 text-sm"
+                    value={waksmanBatchCount}
+                    onChange={(e) => setWaksmanBatchCount(parseInt(e.target.value, 10) || 10)}
+                  />
+                  <button
+                    className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-slate-800/70 border border-slate-700/60 hover:bg-slate-800/90 disabled:opacity-50"
+                    onClick={handleGenerateWaksmanBatch}
+                    disabled={waksmanBatchGenerating}
+                  >
+                    {waksmanBatchGenerating ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <Shuffle size={16} />
+                    )}
+                    Batch Random
+                  </button>
+                </div>
+              </div>
+
+              {waksmanError && (
+                <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                  {waksmanError}
+                </div>
+              )}
+
+              {/* Waksman stats by width */}
+              {waksmanStats && Object.keys(waksmanStats.by_width).length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-xs text-slate-400">Stats by Width</div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    {Object.entries(waksmanStats.by_width)
+                      .sort((a, b) => parseInt(a[0]) - parseInt(b[0]))
+                      .map(([w, data]) => (
+                        <div
+                          key={w}
+                          className="bg-slate-900/60 rounded-lg p-2 border border-slate-800/70"
+                        >
+                          <div className="font-semibold">{w}w</div>
+                          <div className="text-slate-400">
+                            {(data as { count?: number }).count ?? '-'} circuits
+                            {' · '}
+                            avg {((data as { avg_gates?: number }).avg_gates ?? 0).toFixed(0)}g
+                            {' · '}
+                            avg {((data as { avg_swaps?: number }).avg_swaps ?? 0).toFixed(0)} swaps
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Result display */}
+            <div className="space-y-3">
+              <div className="text-sm font-semibold">Generated Circuit</div>
+              {!waksmanResult ? (
+                <div className="text-sm text-slate-400">
+                  Click &quot;Generate&quot; to create a Waksman circuit.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-4 gap-2 text-xs">
+                    <div className="bg-slate-900/60 rounded-lg p-2 border border-slate-800/70">
+                      <div className="text-slate-400">Width</div>
+                      <div className="text-base font-semibold">{waksmanResult.width}</div>
+                    </div>
+                    <div className="bg-slate-900/60 rounded-lg p-2 border border-slate-800/70">
+                      <div className="text-slate-400">Gates</div>
+                      <div className="text-base font-semibold">{waksmanResult.gate_count}</div>
+                    </div>
+                    <div className="bg-slate-900/60 rounded-lg p-2 border border-slate-800/70">
+                      <div className="text-slate-400">Swaps</div>
+                      <div className="text-base font-semibold">{waksmanResult.swap_count}</div>
+                    </div>
+                    <div className="bg-slate-900/60 rounded-lg p-2 border border-slate-800/70">
+                      <div className="text-slate-400">Obfuscated</div>
+                      <div className="text-base font-semibold">
+                        {waksmanResult.obfuscated ? (
+                          <span className="text-amber-400">Yes ({waksmanResult.identity_slots} slots)</span>
+                        ) : (
+                          <span className="text-slate-500">No</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-400">Permutation</div>
+                    <div className="font-mono text-sm break-all">
+                      [{waksmanResult.permutation.join(', ')}]
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-400">Cycle Notation</div>
+                    <div className="font-mono text-sm">
+                      {formatCycle(cycleFromPerm(waksmanResult.permutation))}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-400 mb-1">ASCII Diagram</div>
+                    <pre className="text-xs font-mono bg-slate-950/60 border border-slate-800/70 rounded-lg p-3 overflow-x-auto max-h-[200px]">
+                      {drawAscii(waksmanResult.width, waksmanResult.gates)}
+                    </pre>
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    Synthesis time: {waksmanResult.synth_time_ms.toFixed(2)}ms
+                    {waksmanResult.verified && ' · Verified ✓'}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </section>
       </main>

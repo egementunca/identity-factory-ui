@@ -45,9 +45,7 @@ These are useful for cleanup/refactor planning:
 - `CircuitsDatabaseView` expects `permutation_hash` and `created_at` fields that are not present in the current API response.
 - `CircuitsDatabaseView` uses `limit` query param, but the API expects `page` and `size`.
 - `getDimensionGroupCircuits` uses a `details` query param that the API does not accept.
-- `enableDebugLogging` and `disableDebugLogging` are stubs in `src/lib/api.ts`.
 - Mixed environment variables (`NEXT_PUBLIC_API_URL` vs `NEXT_PUBLIC_API_BASE_URL`).
-- Legacy components (`Header`, `Sidebar`, `MainContent`, `DimensionGroupsTable`, `GateCompositionsTable`, `RepresentativesTable`, `CircuitDetails`) are not referenced by any current page.
 
 See `identity-factory-ui/docs/ROUTES_AND_COMPONENTS.md` for the route/component map.
 

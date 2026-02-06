@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import SkeletonGraph from '../SkeletonGraph';
 import { PlaygroundCircuit, PlaygroundGate, DatabaseSearchResult, DatabaseSearchResponse, DatabaseSource } from '@/types/api';
+import { API_HOST } from '@/lib/api';
 
 type PanelTab = 'skeleton' | 'database' | 'analysis';
 
@@ -62,7 +63,7 @@ export default function RightPanel({
   const [selectedSources, setSelectedSources] = useState<DatabaseSource[]>(['skeleton', 'eca57-lmdb', 'sqlite']);
   const [loadingCircuitId, setLoadingCircuitId] = useState<string | null>(null);
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+  const API_BASE = API_HOST;
 
   // Resizable panel state
   const [panelWidth, setPanelWidth] = useState(320);
@@ -354,11 +355,11 @@ export default function RightPanel({
 
             {/* Results */}
             <div className="space-y-1 mt-2">
-              {searchResults.length === 0 ? (
-                <div className="text-[10px] text-[var(--text-muted)] text-center py-4">
-                  No results. Try searching for circuits (e.g. "4w 8g").
-                </div>
-              ) : (
+	              {searchResults.length === 0 ? (
+	                <div className="text-[10px] text-[var(--text-muted)] text-center py-4">
+	                  No results. Try searching for circuits (e.g. 4w 8g).
+	                </div>
+	              ) : (
                 searchResults.map((result) => (
                   <div
                     key={result.id}

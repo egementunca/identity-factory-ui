@@ -13,8 +13,10 @@ import StatusBar from './StatusBar';
 import CircuitCanvasV2 from './CircuitCanvasV2';
 import IdentityBrowser from '../IdentityBrowser';
 import { PlaygroundCircuit, PlaygroundGate } from '@/types/api';
+import { API_HOST } from '@/lib/api';
+import { getTopologicalOrder } from '@/lib/circuitUtils';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+const API_BASE = API_HOST;
 
 const INITIAL_WIDTH = 4;
 const INITIAL_LENGTH = 12;
@@ -31,58 +33,6 @@ function createEmptyCircuit(): PlaygroundCircuit {
     length: INITIAL_LENGTH,
     gates: [],
   };
-}
-
-// Gate collision detection (ECA57: collide if one's target is in other's controls)
-function gatesCollide(g1: PlaygroundGate, g2: PlaygroundGate): boolean {
-  return g2.controls.includes(g1.target) || g1.controls.includes(g2.target);
-}
-
-// Topological ordering
-function getTopologicalOrder(gates: PlaygroundGate[]): PlaygroundGate[] {
-  const n = gates.length;
-  if (n === 0) return [];
-
-  const edges: [number, number][] = [];
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      if (gatesCollide(gates[i], gates[j])) {
-        edges.push([i, j]);
-      }
-    }
-  }
-
-  const inDegree = new Array(n).fill(0);
-  const adjList: number[][] = Array.from({ length: n }, () => []);
-  for (const [src, dst] of edges) {
-    adjList[src].push(dst);
-    inDegree[dst]++;
-  }
-
-  const result: number[] = [];
-  const queue: number[] = [];
-
-  for (let i = 0; i < n; i++) {
-    if (inDegree[i] === 0) queue.push(i);
-  }
-
-  while (queue.length > 0) {
-    queue.sort((a, b) => gates[b].target - gates[a].target);
-    const node = queue.shift()!;
-    result.push(node);
-
-    for (const neighbor of adjList[node]) {
-      inDegree[neighbor]--;
-      if (inDegree[neighbor] === 0) {
-        queue.push(neighbor);
-      }
-    }
-  }
-
-  return result.map((oldIdx, newStep) => ({
-    ...gates[oldIdx],
-    step: newStep,
-  }));
 }
 
 export default function PlaygroundPro() {

@@ -11,21 +11,14 @@ interface RunsListProps {
 export function RunsList({ runs, onCancel, onDelete }: RunsListProps) {
   if (runs.length === 0) {
     return (
-      <div className="runs-empty">
+      <div className="text-center py-10 text-slate-500">
         <p>No generation runs yet. Start one above!</p>
-        <style jsx>{`
-          .runs-empty {
-            text-align: center;
-            padding: 40px;
-            color: rgba(200, 200, 220, 0.5);
-          }
-        `}</style>
       </div>
     );
   }
 
   return (
-    <div className="runs-list">
+    <div className="flex flex-col gap-3">
       {runs.map((run) => (
         <RunItem
           key={run.run_id}
@@ -34,13 +27,6 @@ export function RunsList({ runs, onCancel, onDelete }: RunsListProps) {
           onDelete={onDelete}
         />
       ))}
-      <style jsx>{`
-        .runs-list {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-      `}</style>
     </div>
   );
 }
@@ -69,282 +55,118 @@ function RunItem({ run, onCancel, onDelete }: RunItemProps) {
     return `${mins}m ${secs}s`;
   };
 
+  const borderColor = isActive
+    ? 'border-blue-400/40 animate-pulse'
+    : isSuccess
+      ? 'border-green-400/40'
+      : isError
+        ? 'border-red-400/40'
+        : isCancelled
+          ? 'border-yellow-400/40 opacity-70'
+          : 'border-slate-600/20';
+
+  const badgeStyle = isActive
+    ? 'bg-blue-500/20 text-blue-300'
+    : isSuccess
+      ? 'bg-green-500/20 text-green-300'
+      : isError
+        ? 'bg-red-500/20 text-red-300'
+        : 'bg-slate-600/20 text-slate-400';
+
   return (
-    <div className={`run-item ${run.status}`}>
-      <div className="run-header">
-        <div className="run-info">
-          <span className="run-id">#{run.run_id}</span>
-          <span className="run-generator">{run.generator_name}</span>
-          <span className="run-dims">
+    <div
+      className={`bg-slate-800/80 border rounded-xl p-4 transition-all ${borderColor}`}
+    >
+      <div className="flex justify-between items-center mb-3">
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-xs text-blue-400/80">
+            #{run.run_id}
+          </span>
+          <span className="font-semibold text-white">{run.generator_name}</span>
+          <span className="text-sm text-slate-400 px-2 py-0.5 bg-slate-600/20 rounded">
             {run.current_width}w × {run.current_gate_count}g
           </span>
         </div>
-        <div className="run-status-badge">
-          {isActive && <span className="pulse"></span>}
+        <div
+          className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${badgeStyle}`}
+        >
+          {isActive && (
+            <span className="w-2 h-2 bg-current rounded-full animate-pulse" />
+          )}
           {run.status}
         </div>
       </div>
 
-      <div className="run-stats">
-        <div className="stat">
-          <span className="stat-value">{run.circuits_found}</span>
-          <span className="stat-label">Found</span>
+      <div className="grid grid-cols-4 gap-3 mb-3">
+        <div className="flex flex-col items-center p-2 bg-black/20 rounded-lg">
+          <span className="text-lg font-semibold text-white">
+            {run.circuits_found}
+          </span>
+          <span className="text-[0.7rem] text-slate-500 uppercase tracking-wide">
+            Found
+          </span>
         </div>
-        <div className="stat">
-          <span className="stat-value">{run.circuits_stored}</span>
-          <span className="stat-label">Stored</span>
+        <div className="flex flex-col items-center p-2 bg-black/20 rounded-lg">
+          <span className="text-lg font-semibold text-white">
+            {run.circuits_stored}
+          </span>
+          <span className="text-[0.7rem] text-slate-500 uppercase tracking-wide">
+            Stored
+          </span>
         </div>
-        <div className="stat">
-          <span className="stat-value">
+        <div className="flex flex-col items-center p-2 bg-black/20 rounded-lg">
+          <span className="text-lg font-semibold text-white">
             {run.circuits_per_second.toFixed(1)}/s
           </span>
-          <span className="stat-label">Rate</span>
+          <span className="text-[0.7rem] text-slate-500 uppercase tracking-wide">
+            Rate
+          </span>
         </div>
-        <div className="stat">
-          <span className="stat-value">{formatTime(run.elapsed_seconds)}</span>
-          <span className="stat-label">Elapsed</span>
+        <div className="flex flex-col items-center p-2 bg-black/20 rounded-lg">
+          <span className="text-lg font-semibold text-white">
+            {formatTime(run.elapsed_seconds)}
+          </span>
+          <span className="text-[0.7rem] text-slate-500 uppercase tracking-wide">
+            Elapsed
+          </span>
         </div>
       </div>
 
       {isActive && (
-        <div className="progress-bar">
+        <div className="h-1 bg-slate-600/20 rounded-sm mb-2 overflow-hidden">
           <div
-            className="progress-fill"
+            className="h-full bg-gradient-to-r from-blue-600 to-blue-300 rounded-sm transition-all duration-300"
             style={{ width: `${progress}%` }}
-          ></div>
+          />
         </div>
       )}
 
-      <div className="run-status-text">{run.current_status}</div>
+      <div className="text-sm text-slate-400 mb-2">{run.current_status}</div>
 
-      {run.error && <div className="run-error">{run.error}</div>}
+      {run.error && (
+        <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-md text-red-300 text-sm mb-2">
+          {run.error}
+        </div>
+      )}
 
-      <div className="run-actions">
+      <div className="flex gap-2 justify-end">
         {isActive && (
-          <button className="btn-cancel" onClick={() => onCancel(run.run_id)}>
+          <button
+            className="px-4 py-1.5 rounded-md text-sm font-medium cursor-pointer transition-all bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30"
+            onClick={() => onCancel(run.run_id)}
+          >
             Cancel
           </button>
         )}
         {(isSuccess || isError || isCancelled) && (
-          <button className="btn-delete" onClick={() => onDelete(run.run_id)}>
+          <button
+            className="px-4 py-1.5 rounded-md text-sm font-medium cursor-pointer transition-all bg-red-500/15 text-red-300 hover:bg-red-500/25"
+            onClick={() => onDelete(run.run_id)}
+          >
             Remove
           </button>
         )}
       </div>
-
-      <style jsx>{`
-        .run-item {
-          background: rgba(30, 30, 40, 0.8);
-          border: 1px solid rgba(100, 100, 150, 0.2);
-          border-radius: 12px;
-          padding: 16px;
-          transition: all 0.3s;
-        }
-
-        .run-item.running {
-          border-color: rgba(100, 150, 255, 0.4);
-          animation: glow 2s ease-in-out infinite;
-        }
-
-        .run-item.completed {
-          border-color: rgba(100, 255, 150, 0.4);
-        }
-
-        .run-item.failed {
-          border-color: rgba(255, 100, 100, 0.4);
-        }
-
-        .run-item.cancelled {
-          border-color: rgba(255, 200, 100, 0.4);
-          opacity: 0.7;
-        }
-
-        @keyframes glow {
-          0%,
-          100% {
-            box-shadow: 0 0 5px rgba(100, 150, 255, 0.2);
-          }
-          50% {
-            box-shadow: 0 0 20px rgba(100, 150, 255, 0.4);
-          }
-        }
-
-        .run-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 12px;
-        }
-
-        .run-info {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .run-id {
-          font-family: monospace;
-          font-size: 0.8rem;
-          color: rgba(100, 150, 255, 0.8);
-        }
-
-        .run-generator {
-          font-weight: 600;
-          color: #fff;
-        }
-
-        .run-dims {
-          font-size: 0.85rem;
-          color: rgba(200, 200, 220, 0.6);
-          padding: 2px 8px;
-          background: rgba(100, 100, 150, 0.2);
-          border-radius: 4px;
-        }
-
-        .run-status-badge {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          padding: 4px 12px;
-          border-radius: 12px;
-          font-size: 0.75rem;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          background: rgba(100, 100, 150, 0.2);
-          color: rgba(200, 200, 220, 0.8);
-        }
-
-        .run-item.running .run-status-badge {
-          background: rgba(100, 150, 255, 0.2);
-          color: #8ab4ff;
-        }
-
-        .run-item.completed .run-status-badge {
-          background: rgba(100, 255, 150, 0.2);
-          color: #8affb4;
-        }
-
-        .run-item.failed .run-status-badge {
-          background: rgba(255, 100, 100, 0.2);
-          color: #ff8a8a;
-        }
-
-        .pulse {
-          width: 8px;
-          height: 8px;
-          background: currentColor;
-          border-radius: 50%;
-          animation: pulse 1s ease-in-out infinite;
-        }
-
-        @keyframes pulse {
-          0%,
-          100% {
-            opacity: 1;
-            transform: scale(1);
-          }
-          50% {
-            opacity: 0.5;
-            transform: scale(0.8);
-          }
-        }
-
-        .run-stats {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 12px;
-          margin-bottom: 12px;
-        }
-
-        .stat {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          padding: 8px;
-          background: rgba(0, 0, 0, 0.2);
-          border-radius: 8px;
-        }
-
-        .stat-value {
-          font-size: 1.1rem;
-          font-weight: 600;
-          color: #fff;
-        }
-
-        .stat-label {
-          font-size: 0.7rem;
-          color: rgba(200, 200, 220, 0.5);
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-
-        .progress-bar {
-          height: 4px;
-          background: rgba(100, 100, 150, 0.2);
-          border-radius: 2px;
-          margin-bottom: 8px;
-          overflow: hidden;
-        }
-
-        .progress-fill {
-          height: 100%;
-          background: linear-gradient(90deg, #4a6fff, #8ab4ff);
-          border-radius: 2px;
-          transition: width 0.3s ease;
-        }
-
-        .run-status-text {
-          font-size: 0.85rem;
-          color: rgba(200, 200, 220, 0.6);
-          margin-bottom: 8px;
-        }
-
-        .run-error {
-          padding: 8px 12px;
-          background: rgba(255, 100, 100, 0.1);
-          border: 1px solid rgba(255, 100, 100, 0.3);
-          border-radius: 6px;
-          color: #ff8a8a;
-          font-size: 0.85rem;
-          margin-bottom: 8px;
-        }
-
-        .run-actions {
-          display: flex;
-          gap: 8px;
-          justify-content: flex-end;
-        }
-
-        .btn-cancel,
-        .btn-delete {
-          padding: 6px 16px;
-          border-radius: 6px;
-          font-size: 0.85rem;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.2s;
-          border: none;
-        }
-
-        .btn-cancel {
-          background: rgba(255, 200, 100, 0.2);
-          color: #ffc864;
-        }
-
-        .btn-cancel:hover {
-          background: rgba(255, 200, 100, 0.3);
-        }
-
-        .btn-delete {
-          background: rgba(255, 100, 100, 0.15);
-          color: #ff8a8a;
-        }
-
-        .btn-delete:hover {
-          background: rgba(255, 100, 100, 0.25);
-        }
-      `}</style>
     </div>
   );
 }

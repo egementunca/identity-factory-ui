@@ -11,8 +11,8 @@ import {
   X,
   GitBranch,
 } from 'lucide-react';
-
-const API_BASE = 'http://localhost:8000/api/v1';
+import { API_BASE } from '@/lib/api';
+import { gatesCollide } from '@/lib/circuitUtils';
 
 interface ClusterStats {
   total_circuits: number;
@@ -236,18 +236,6 @@ export default function ClusterDatabaseView() {
     return lines.join('\n');
   };
 
-  // Check if two gates collide (target of one is control of other)
-  // Matches local_mixing Gate::collides_index logic
-  const gatesCollide = (
-    g1: { target: number; controls: number[] },
-    g2: { target: number; controls: number[] }
-  ) => {
-    // Check if g1.target is in g2.controls
-    if (g2.controls.includes(g1.target)) return true;
-    // Check if g2.target is in g1.controls
-    if (g1.controls.includes(g2.target)) return true;
-    return false;
-  };
 
   // Build skeleton DAG: nodes are gates, edges are collision dependencies
   // Matches local_mixing create_skeleton logic

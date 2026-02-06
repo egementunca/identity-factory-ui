@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { FolderOpen, FileText, Download, X, RefreshCw, Clock, Layers , Cpu, Folder } from 'lucide-react';
+import { FolderOpen, FileText, Download, X, RefreshCw, Clock, Layers, Cpu, Folder } from 'lucide-react';
+import { API_HOST } from '@/lib/api';
 
 interface IdentityFile {
   filename: string;
@@ -19,7 +20,7 @@ interface IdentityBrowserProps {
   onClose: () => void;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+const API_BASE = API_HOST;
 
 export default function IdentityBrowser({ onLoadCircuit, isOpen, onClose }: IdentityBrowserProps) {
   const [identities, setIdentities] = useState<IdentityFile[]>([]);

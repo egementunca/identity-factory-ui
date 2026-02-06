@@ -24,31 +24,41 @@ export default function GeneratorsPage() {
   const activeRuns = runs.filter((r) => r.status === 'running');
 
   return (
-    <div className="page">
+    <div className="min-h-screen bg-gradient-to-b from-slate-950 to-slate-900">
       <Navigation />
 
-      <main className="page-content">
-        <header className="page-header">
-          <h1>Circuit Generators</h1>
-          <p>Generate identity circuits using various methods</p>
+      <main className="max-w-[1200px] mx-auto p-6">
+        <header className="mb-8">
+          <h1 className="text-2xl font-bold mb-2 bg-gradient-to-br from-white to-blue-200/90 bg-clip-text text-transparent">
+            Circuit Generators
+          </h1>
+          <p className="text-slate-400">
+            Generate identity circuits using various methods
+          </p>
         </header>
 
-        {/* Active Indicator */}
         {activeRuns.length > 0 && (
-          <div className="active-banner">
-            <span className="pulse" />
+          <div className="inline-flex items-center gap-2.5 bg-green-500/15 border border-green-500/30 px-5 py-2.5 rounded-xl text-green-300 font-semibold mb-6">
+            <span className="w-2.5 h-2.5 rounded-full bg-green-300 animate-pulse" />
             {activeRuns.length} Active Run{activeRuns.length > 1 ? 's' : ''}
           </div>
         )}
 
-        {/* Available Generators */}
-        <section className="section">
-          <h2>Available Generators</h2>
-          {genError && <div className="error-banner">{genError}</div>}
+        <section className="mb-10">
+          <h2 className="text-lg font-semibold text-slate-300 mb-4">
+            Available Generators
+          </h2>
+          {genError && (
+            <div className="p-5 text-center bg-red-500/10 rounded-lg text-red-300">
+              {genError}
+            </div>
+          )}
           {genLoading ? (
-            <div className="loading">Loading generators...</div>
+            <div className="p-5 text-center text-slate-400">
+              Loading generators...
+            </div>
           ) : (
-            <div className="generators-grid">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(350px,1fr))] gap-4">
               {generators.map((gen) => (
                 <GeneratorCard
                   key={gen.name}
@@ -63,135 +73,21 @@ export default function GeneratorsPage() {
           )}
         </section>
 
-        {/* Generation Runs */}
-        <section className="section">
-          <div className="section-header">
-            <h2>Generation Runs</h2>
-            <button className="btn-refresh" onClick={refreshRuns}>
+        <section className="mb-10">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold text-slate-300">
+              Generation Runs
+            </h2>
+            <button
+              className="bg-slate-600/20 border border-slate-600/30 px-4 py-2 rounded-lg text-slate-400 cursor-pointer hover:bg-slate-600/40 hover:text-white transition-colors"
+              onClick={refreshRuns}
+            >
               ↻ Refresh
             </button>
           </div>
           <RunsList runs={runs} onCancel={cancel} onDelete={remove} />
         </section>
       </main>
-
-      <style jsx>{`
-        .page {
-          min-height: 100vh;
-          background: linear-gradient(180deg, #0a0a0f 0%, #12121a 100%);
-        }
-
-        .page-content {
-          max-width: 1200px;
-          margin: 0 auto;
-          padding: 24px;
-        }
-
-        .page-header {
-          margin-bottom: 32px;
-        }
-
-        .page-header h1 {
-          font-size: 1.75rem;
-          font-weight: 700;
-          margin-bottom: 8px;
-          background: linear-gradient(135deg, #fff, rgba(150, 200, 255, 0.9));
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-        }
-
-        .page-header p {
-          color: rgba(200, 200, 220, 0.6);
-        }
-
-        .active-banner {
-          display: inline-flex;
-          align-items: center;
-          gap: 10px;
-          background: rgba(100, 255, 150, 0.15);
-          border: 1px solid rgba(100, 255, 150, 0.3);
-          padding: 10px 20px;
-          border-radius: 12px;
-          color: #8affb4;
-          font-weight: 600;
-          margin-bottom: 24px;
-        }
-
-        .pulse {
-          width: 10px;
-          height: 10px;
-          border-radius: 50%;
-          background: #8affb4;
-          animation: pulse 1.5s infinite;
-        }
-
-        @keyframes pulse {
-          0%,
-          100% {
-            opacity: 1;
-            transform: scale(1);
-          }
-          50% {
-            opacity: 0.5;
-            transform: scale(1.2);
-          }
-        }
-
-        .section {
-          margin-bottom: 40px;
-        }
-
-        .section h2 {
-          font-size: 1.1rem;
-          font-weight: 600;
-          color: rgba(200, 200, 220, 0.9);
-          margin-bottom: 16px;
-        }
-
-        .section-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 16px;
-        }
-
-        .section-header h2 {
-          margin-bottom: 0;
-        }
-
-        .generators-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-          gap: 16px;
-        }
-
-        .btn-refresh {
-          background: rgba(100, 100, 150, 0.2);
-          border: 1px solid rgba(100, 100, 150, 0.3);
-          padding: 8px 16px;
-          border-radius: 8px;
-          color: rgba(200, 200, 220, 0.8);
-          cursor: pointer;
-        }
-
-        .btn-refresh:hover {
-          background: rgba(100, 100, 150, 0.4);
-          color: #fff;
-        }
-
-        .loading,
-        .error-banner {
-          padding: 20px;
-          text-align: center;
-          color: rgba(200, 200, 220, 0.6);
-        }
-
-        .error-banner {
-          background: rgba(255, 100, 100, 0.1);
-          border-radius: 8px;
-          color: #ff8a8a;
-        }
-      `}</style>
     </div>
   );
 }

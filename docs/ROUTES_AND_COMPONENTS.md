@@ -59,7 +59,3 @@ Notes:
 - `src/components/Navigation.tsx` - Primary navigation bar for the app.
 - `src/components/InfoTooltip.tsx` - Tooltip for parameter explanations.
 
-## Legacy / unused components
-These exist in `src/components/` but are not referenced by any current route:
-- `Header.tsx`, `Sidebar.tsx`, `MainContent.tsx`
-- `DimensionGroupsTable.tsx`, `GateCompositionsTable.tsx`, `RepresentativesTable.tsx`, `CircuitDetails.tsx`

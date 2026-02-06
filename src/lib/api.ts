@@ -2,7 +2,29 @@
  * API client for Identity Circuit Factory
  */
 
-const API_BASE = 'http://localhost:8000/api/v1';
+// Use environment variable with fallback for local development
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
+
+// Base URL without /api/v1 suffix for SSE endpoints
+export const API_HOST = process.env.NEXT_PUBLIC_API_HOST || 'http://localhost:8000';
+
+/**
+ * Base fetch wrapper with consistent error handling
+ */
+async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${endpoint}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(error.detail || `API error: ${res.status}`);
+  }
+  return res.json();
+}
 
 export interface GeneratorInfo {
   name: string;
@@ -60,141 +82,59 @@ export interface FactoryStats {
   database_size_mb?: number;
 }
 
-// Debug API
-export async function enableDebugLogging(): Promise<{ message: string }> {
-  // Placeholder - assuming backend has this or likely to add or it was removed
-  // For now verify against backend endpoints later
-  console.warn('enableDebugLogging not implemented on backend');
-  return { message: 'Debug logging enabled (mock)' };
-}
-
-export async function disableDebugLogging(): Promise<{ message: string }> {
-  console.warn('disableDebugLogging not implemented on backend');
-  return { message: 'Debug logging disabled (mock)' };
-}
-
-export async function generateCircuit(data: any): Promise<any> {
-  // Mapping to startGeneration?
-  // This seems to be a specialized generation
-  return startGeneration({
-    generator_name: 'eca57', // default?
-    width: data.width,
-    gate_count: data.forward_length,
-    gate_set: 'x,cx,ccx',
-    max_circuits: 1,
-    config: data
-  });
-}
-
-export async function generateWithDebug(data: any): Promise<any> {
-  return generateCircuit({ ...data, debug: true });
-}
-
-// Helper aliases for missing exports
+// Helper aliases
 export const getDimensionGroups = listDimGroups;
 
-export async function getDimensionGroupCompositions(dimGroupId: number): Promise<any> {
-  const res = await fetch(`${API_BASE}/dim-groups/${dimGroupId}/compositions`);
-  if (!res.ok) throw new Error('Failed to fetch compositions');
-  return res.json();
-}
-
-export async function getDimensionGroupCircuits(dimGroupId: number, loadDetails?: boolean): Promise<any> {
-  const res = await fetch(`${API_BASE}/dim-groups/${dimGroupId}/circuits?details=${!!loadDetails}`);
-  if (!res.ok) throw new Error('Failed to fetch circuits');
-  return res.json();
-}
-
-// Circuit Visualization
-export async function getCircuitVisualization(circuitId: number): Promise<any> {
-  const res = await fetch(`${API_BASE}/circuits/${circuitId}/visualization`);
-  if (!res.ok) throw new Error('Failed to fetch visualization');
-  return res.json();
-}
-
 // Generators API
-export async function listGenerators(): Promise<GeneratorInfo[]> {
-  const res = await fetch(`${API_BASE}/generators/`);
-  if (!res.ok) throw new Error('Failed to fetch generators');
-  return res.json();
+export function listGenerators(): Promise<GeneratorInfo[]> {
+  return apiFetch('/generators/');
 }
 
-export async function getGenerator(name: string): Promise<GeneratorInfo> {
-  const res = await fetch(`${API_BASE}/generators/${name}`);
-  if (!res.ok) throw new Error(`Generator ${name} not found`);
-  return res.json();
+export function getGenerator(name: string): Promise<GeneratorInfo> {
+  return apiFetch(`/generators/${name}`);
 }
 
-export async function listGateSets(): Promise<{ gate_sets: string[] }> {
-  const res = await fetch(`${API_BASE}/generators/gate-sets/`);
-  if (!res.ok) throw new Error('Failed to fetch gate sets');
-  return res.json();
+export function listGateSets(): Promise<{ gate_sets: string[] }> {
+  return apiFetch('/generators/gate-sets/');
 }
 
-export async function startGeneration(
-  request: GenerateRequest
-): Promise<RunStatus> {
-  const res = await fetch(`${API_BASE}/generators/run`, {
+export function startGeneration(request: GenerateRequest): Promise<RunStatus> {
+  return apiFetch('/generators/run', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
   });
-  if (!res.ok) {
-    const error = await res.json();
-    throw new Error(error.detail || 'Failed to start generation');
-  }
-  return res.json();
 }
 
-export async function listRuns(
-  status?: string,
-  generator?: string
-): Promise<RunStatus[]> {
+export function listRuns(status?: string, generator?: string): Promise<RunStatus[]> {
   const params = new URLSearchParams();
   if (status) params.set('status', status);
   if (generator) params.set('generator_name', generator);
-  const res = await fetch(`${API_BASE}/generators/runs/?${params}`);
-  if (!res.ok) throw new Error('Failed to fetch runs');
-  return res.json();
+  return apiFetch(`/generators/runs/?${params}`);
 }
 
-export async function getRunStatus(runId: string): Promise<RunStatus> {
-  const res = await fetch(`${API_BASE}/generators/runs/${runId}`);
-  if (!res.ok) throw new Error(`Run ${runId} not found`);
-  return res.json();
+export function getRunStatus(runId: string): Promise<RunStatus> {
+  return apiFetch(`/generators/runs/${runId}`);
 }
 
 export async function cancelRun(runId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/generators/runs/${runId}/cancel`, {
-    method: 'POST',
-  });
-  if (!res.ok) throw new Error('Failed to cancel run');
+  await apiFetch(`/generators/runs/${runId}/cancel`, { method: 'POST' });
 }
 
 export async function deleteRun(runId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/generators/runs/${runId}`, {
-    method: 'DELETE',
-  });
-  if (!res.ok) throw new Error('Failed to delete run');
+  await apiFetch(`/generators/runs/${runId}`, { method: 'DELETE' });
 }
 
 // Factory API
-export async function getFactoryStats(): Promise<FactoryStats> {
-  const res = await fetch(`${API_BASE}/stats`);
-  if (!res.ok) throw new Error('Failed to fetch stats');
-  return res.json();
+export function getFactoryStats(): Promise<FactoryStats> {
+  return apiFetch('/stats');
 }
 
-export async function listDimGroups(): Promise<DimGroup[]> {
-  const res = await fetch(`${API_BASE}/dim-groups`);
-  if (!res.ok) throw new Error('Failed to fetch dimension groups');
-  return res.json();
+export function listDimGroups(): Promise<DimGroup[]> {
+  return apiFetch('/dim-groups');
 }
 
-export async function getHealth(): Promise<{ status: string }> {
-  const res = await fetch(`${API_BASE}/health`);
-  if (!res.ok) throw new Error('API not available');
-  return res.json();
+export function getHealth(): Promise<{ status: string }> {
+  return apiFetch('/health');
 }
 
 // ===== ECA57 LMDB API =====
@@ -224,19 +164,15 @@ export interface ECA57DatabaseStats {
   total_circuits: number;
 }
 
-export async function getECA57Stats(): Promise<ECA57DatabaseStats> {
-  const res = await fetch(`${API_BASE}/eca57-lmdb/stats`);
-  if (!res.ok) throw new Error('Failed to fetch ECA57 LMDB stats');
-  return res.json();
+export function getECA57Stats(): Promise<ECA57DatabaseStats> {
+  return apiFetch('/eca57-lmdb/stats');
 }
 
-export async function getECA57Configurations(): Promise<ECA57ConfigStats[]> {
-  const res = await fetch(`${API_BASE}/eca57-lmdb/configurations`);
-  if (!res.ok) throw new Error('Failed to fetch configurations');
-  return res.json();
+export function getECA57Configurations(): Promise<ECA57ConfigStats[]> {
+  return apiFetch('/eca57-lmdb/configurations');
 }
 
-export async function getECA57Circuits(
+export function getECA57Circuits(
   width: number,
   gateCount: number,
   offset: number = 0,
@@ -250,24 +186,15 @@ export async function getECA57Circuits(
     include_skeleton: String(includeSkeleton),
     include_complexity: String(includeComplexity),
   });
-  const res = await fetch(
-    `${API_BASE}/eca57-lmdb/circuits/${width}/${gateCount}?${params}`
-  );
-  if (!res.ok)
-    throw new Error(`Failed to fetch circuits for w${width}g${gateCount}`);
-  return res.json();
+  return apiFetch(`/eca57-lmdb/circuits/${width}/${gateCount}?${params}`);
 }
 
-export async function getECA57Circuit(
+export function getECA57Circuit(
   width: number,
   gateCount: number,
   circuitId: number
 ): Promise<ECA57Circuit> {
-  const res = await fetch(
-    `${API_BASE}/eca57-lmdb/circuit/${width}/${gateCount}/${circuitId}`
-  );
-  if (!res.ok) throw new Error('Circuit not found');
-  return res.json();
+  return apiFetch(`/eca57-lmdb/circuit/${width}/${gateCount}/${circuitId}`);
 }
 
 export interface EquivalentForm {
@@ -283,17 +210,13 @@ export interface EquivalentsResponse {
   equivalents: EquivalentForm[];
 }
 
-export async function getECA57Equivalents(
+export function getECA57Equivalents(
   width: number,
   gateCount: number,
   circuitId: number,
   limit: number = 20
 ): Promise<EquivalentsResponse> {
-  const res = await fetch(
-    `${API_BASE}/eca57-lmdb/circuit/${width}/${gateCount}/${circuitId}/equivalents?limit=${limit}`
-  );
-  if (!res.ok) throw new Error('Failed to fetch equivalents');
-  return res.json();
+  return apiFetch(`/eca57-lmdb/circuit/${width}/${gateCount}/${circuitId}/equivalents?limit=${limit}`);
 }
 
 // ===== Skeleton Identity Database API =====
@@ -333,19 +256,15 @@ export interface SkeletonExplorerStats {
   total_taxonomies: number;
 }
 
-export async function getSkeletonStats(): Promise<SkeletonExplorerStats> {
-  const res = await fetch(`${API_BASE}/skeleton/explorer/stats`);
-  if (!res.ok) throw new Error('Failed to fetch skeleton stats');
-  return res.json();
+export function getSkeletonStats(): Promise<SkeletonExplorerStats> {
+  return apiFetch('/skeleton/explorer/stats');
 }
 
-export async function getSkeletonTaxonomies(width: number): Promise<TaxonomyStats[]> {
-  const res = await fetch(`${API_BASE}/skeleton/explorer/taxonomies/${width}`);
-  if (!res.ok) throw new Error(`Failed to fetch taxonomies for width ${width}`);
-  return res.json();
+export function getSkeletonTaxonomies(width: number): Promise<TaxonomyStats[]> {
+  return apiFetch(`/skeleton/explorer/taxonomies/${width}`);
 }
 
-export async function getSkeletonCircuits(
+export function getSkeletonCircuits(
   width: number,
   taxonomy?: string,
   offset: number = 0,
@@ -356,25 +275,114 @@ export async function getSkeletonCircuits(
     limit: String(limit),
   });
   if (taxonomy) params.set('taxonomy', taxonomy);
-  const res = await fetch(`${API_BASE}/skeleton/explorer/circuits/${width}?${params}`);
-  if (!res.ok) throw new Error(`Failed to fetch skeleton circuits for width ${width}`);
-  return res.json();
+  return apiFetch(`/skeleton/explorer/circuits/${width}?${params}`);
 }
 
-export async function getSkeletonCircuitDetail(
+export function getSkeletonCircuitDetail(
   width: number,
   taxonomy: string,
   index: number
 ): Promise<SkeletonCircuitDetail> {
-  // URL-encode taxonomy since it contains special characters like parentheses and commas
   const encodedTaxonomy = encodeURIComponent(taxonomy);
-  const res = await fetch(`${API_BASE}/skeleton/explorer/circuit/${width}/${encodedTaxonomy}/${index}`);
-  if (!res.ok) throw new Error('Skeleton circuit not found');
-  return res.json();
+  return apiFetch(`/skeleton/explorer/circuit/${width}/${encodedTaxonomy}/${index}`);
 }
 
-export async function getRandomSkeletonCircuit(width: number): Promise<SkeletonCircuit> {
-  const res = await fetch(`${API_BASE}/skeleton/random/${width}`);
-  if (!res.ok) throw new Error(`No skeleton circuits for width ${width}`);
-  return res.json();
+export function getRandomSkeletonCircuit(width: number): Promise<SkeletonCircuit> {
+  return apiFetch(`/skeleton/random/${width}`);
+}
+
+// ===== Waksman Network API =====
+
+export interface WaksmanGenerateRequest {
+  width: number;
+  permutation?: number[];
+  permutation_type: 'specific' | 'random' | 'reverse' | 'shift' | 'identity';
+  shift_amount?: number;
+  store_in_db?: boolean;
+  obfuscate?: boolean;
+  identity_gate_count?: number;
+  min_identity_gates?: number;
+  obfuscation_seed?: number;
+}
+
+export interface WaksmanCircuit {
+  id?: number;
+  width: number;
+  permutation: number[];
+  perm_hash: string;
+  gate_count: number;
+  gates: number[][];
+  swap_count: number;
+  synth_time_ms: number;
+  verified?: boolean;
+  obfuscated?: boolean;
+  identity_slots?: number;
+}
+
+export interface WaksmanStatsResponse {
+  total_circuits: number;
+  by_width: Record<string, { count: number; avg_gates: number; avg_swaps: number }>;
+}
+
+export interface WaksmanComparisonResponse {
+  perm_id: number;
+  perm_hash: string;
+  permutation: number[];
+  sat_available: boolean;
+  waksman_available: boolean;
+  sat_gate_count?: number;
+  waksman_gate_count?: number;
+  gate_count_diff?: number;
+}
+
+export interface WaksmanBatchRequest {
+  width: number;
+  count: number;
+  store_in_db?: boolean;
+}
+
+export interface WaksmanBatchResponse {
+  job_id: string;
+  status: string;
+  message: string;
+  circuits_generated: number;
+}
+
+export function generateWaksmanCircuit(request: WaksmanGenerateRequest): Promise<WaksmanCircuit> {
+  return apiFetch('/waksman/generate', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export function getWaksmanCircuits(
+  width?: number,
+  limit: number = 50,
+  offset: number = 0
+): Promise<WaksmanCircuit[]> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  if (width) params.set('width', String(width));
+  return apiFetch(`/waksman/circuits?${params}`);
+}
+
+export function getWaksmanCircuit(circuitId: number): Promise<WaksmanCircuit> {
+  return apiFetch(`/waksman/circuit/${circuitId}`);
+}
+
+export function getWaksmanStats(): Promise<WaksmanStatsResponse> {
+  return apiFetch('/waksman/stats');
+}
+
+export function compareWaksmanVsSat(permHash: string): Promise<WaksmanComparisonResponse> {
+  return apiFetch(`/waksman/compare/${permHash}`);
+}
+
+export function generateWaksmanBatch(request: WaksmanBatchRequest): Promise<WaksmanBatchResponse> {
+  return apiFetch('/waksman/generate-batch', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
 }

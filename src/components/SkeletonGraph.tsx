@@ -6,32 +6,19 @@ import ReactFlow, {
   Edge,
   Position,
   MarkerType,
-  useNodesState,
-  useEdgesState,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { PlaygroundCircuit, PlaygroundGate } from '@/types/api';
+import { gatesCollide } from '@/lib/circuitUtils';
 
 interface SkeletonGraphProps {
   circuit: PlaygroundCircuit;
   highlightedGateId?: string | null;
-  highlightedEdgeGates?: [string, string] | null; // NEW: highlight gates connected by clicked edge
+  highlightedEdgeGates?: [string, string] | null;
   onNodeClick?: (gateId: string) => void;
   onEdgeClick?: (gate1Id: string, gate2Id: string) => void;
   forceShow?: boolean;
   selectedGateIds?: Set<string>;
-}
-
-// Check if two gates collide (do not commute)
-// In reversible logic (CNOT/Toffoli/Fredkin), gates collide iff:
-// Target of A overlaps with Controls of B OR Target of B overlaps with Controls of A.
-// Target-Target and Control-Control pairs COMMUTE (do not collide).
-function gatesCollide(g1: PlaygroundGate, g2: PlaygroundGate): boolean {
-  // Check if g1.target is in g2.controls
-  if (g2.controls.includes(g1.target)) return true;
-  // Check if g2.target is in g1.controls
-  if (g1.controls.includes(g2.target)) return true;
-  return false;
 }
 
 // Get topological levels from skeleton edges

@@ -1,18 +1,19 @@
 import { useState, useEffect } from 'react';
-import { 
-  History, 
-  CheckCircle, 
-  XCircle, 
-  Clock, 
-  ChevronRight, 
+import {
+  History,
+  CheckCircle,
+  XCircle,
+  Clock,
+  ChevronRight,
   RotateCcw,
   BarChart2,
   Calendar,
   Trash2
 } from 'lucide-react';
 import { ExperimentHistoryItem, ExperimentConfig, ExperimentResults } from '@/types/experiments';
+import { API_HOST } from '@/lib/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE = API_HOST;
 
 interface ExperimentHistoryProps {
   onSelectExperiment: (results: ExperimentResults) => void;

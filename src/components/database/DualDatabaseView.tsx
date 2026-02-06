@@ -10,6 +10,7 @@ import {
   Zap,
   Layers,
 } from 'lucide-react';
+import { API_BASE } from '@/lib/api';
 
 // Types
 interface SATStats {
@@ -153,8 +154,6 @@ type WireFilterState = {
   min_wires_used: string;
   max_wires_used: string;
 };
-
-const API_BASE = 'http://localhost:8000/api/v1';
 
 export default function DualDatabaseView() {
   const emptyWireFilters = (): WireFilterState => ({
