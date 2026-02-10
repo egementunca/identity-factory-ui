@@ -71,17 +71,27 @@ export default function RightPanel({
   const resizeRef = useRef<HTMLDivElement>(null);
 
   const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
     setIsSearching(true);
     try {
       const params = new URLSearchParams();
-      // Parse "4w 8g" format
+      // Parse "4w 8g" format (empty query = show all)
+      // Also supports "swap_flip" or "swap" to search swap-flip gadgets
       const widthMatch = searchQuery.match(/(\d+)w/i);
       const gatesMatch = searchQuery.match(/(\d+)g/i);
+      const isSwapFlip = /swap[_-]?flip|swap/i.test(searchQuery);
+
       if (widthMatch) params.set('width', widthMatch[1]);
       if (gatesMatch) params.set('gate_count', gatesMatch[1]);
       params.set('limit', '30');
-      selectedSources.forEach(s => params.append('sources', s));
+
+      if (isSwapFlip) {
+        // Swap-flip gadgets are not identity circuits
+        params.set('circuit_source', 'swap_flip');
+        params.set('is_identity_only', 'false');
+        params.append('sources', 'sqlite'); // swap-flip only in SQLite
+      } else {
+        selectedSources.forEach(s => params.append('sources', s));
+      }
 
       const res = await fetch(`${API_BASE}/api/v1/search/circuits?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -114,6 +124,29 @@ export default function RightPanel({
         limit: '20',
       });
       selectedSources.forEach(s => params.append('sources', s));
+
+      const res = await fetch(`${API_BASE}/api/v1/search/circuits?${params}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: DatabaseSearchResponse = await res.json();
+      setSearchResults(data.results);
+    } catch (err) {
+      console.error('Search failed:', err);
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSearchSwapFlip = async () => {
+    setIsSearching(true);
+    setSearchQuery('swap_flip');
+    try {
+      const params = new URLSearchParams({
+        circuit_source: 'swap_flip',
+        is_identity_only: 'false',
+        limit: '100',
+      });
+      params.append('sources', 'sqlite');
 
       const res = await fetch(`${API_BASE}/api/v1/search/circuits?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -310,7 +343,7 @@ export default function RightPanel({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                placeholder="Search ECA57 circuits..."
+                placeholder="e.g. 3w 6g, swap_flip, or click Go"
                 className="flex-1 px-2 py-1 text-xs bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded outline-none focus:border-[var(--accent-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
               />
               <button
@@ -331,8 +364,12 @@ export default function RightPanel({
               >
                 This Circuit
               </button>
-              <button className="flex-1 px-2 py-1 text-[10px] text-[var(--text-secondary)] border border-[var(--border-subtle)] rounded hover:border-[var(--border-default)]">
-                Selection
+              <button
+                onClick={handleSearchSwapFlip}
+                disabled={isSearching}
+                className="flex-1 px-2 py-1 text-[10px] text-[var(--accent-secondary)] border border-[var(--accent-secondary)] rounded hover:bg-[var(--accent-secondary)] hover:text-white disabled:opacity-50"
+              >
+                Swap-Flip (203)
               </button>
             </div>
 
@@ -357,8 +394,8 @@ export default function RightPanel({
             <div className="space-y-1 mt-2">
 	              {searchResults.length === 0 ? (
 	                <div className="text-[10px] text-[var(--text-muted)] text-center py-4">
-	                  No results. Try searching for circuits (e.g. 4w 8g).
-	                </div>
+                  Click &quot;Go&quot; to search. Try &quot;3w 6g&quot; or click &quot;Swap-Flip&quot;.
+                </div>
 	              ) : (
                 searchResults.map((result) => (
                   <div

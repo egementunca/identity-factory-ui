@@ -462,21 +462,37 @@ export default function WireShufflerPage() {
     if (!gates || gates.length === 0) {
       return Array.from({ length: width }, (_, i) => `q${i}: -`).join('\n');
     }
+    // Determine actual circuit width from gate indices (may include aux wire)
+    const maxWire = gates.reduce((max, gate) => Math.max(max, ...gate), 0);
+    const actualWidth = Math.max(width, maxWire + 1);
     const cols = gates.length * 2 + 1;
-    const grid: string[][] = Array.from({ length: width }, () =>
+    const grid: string[][] = Array.from({ length: actualWidth }, () =>
       Array.from({ length: cols }, () => '-')
     );
     gates.forEach((gate, idx) => {
-      const [target, c1, c2] = gate;
       const col = idx * 2 + 1;
-      const lo = Math.min(target, c1, c2);
-      const hi = Math.max(target, c1, c2);
-      for (let w = lo; w <= hi; w++) {
-        grid[w][col] = '|';
+      if (gate.length === 2) {
+        // 2-wire swap gate [wire_a, wire_b]
+        const [a, b] = gate;
+        const lo = Math.min(a, b);
+        const hi = Math.max(a, b);
+        for (let w = lo; w <= hi; w++) {
+          grid[w][col] = '|';
+        }
+        grid[a][col] = 'X';
+        grid[b][col] = 'X';
+      } else {
+        // Toffoli/ECA57 gate [target, c1, c2]
+        const [target, c1, c2] = gate;
+        const lo = Math.min(target, c1, c2);
+        const hi = Math.max(target, c1, c2);
+        for (let w = lo; w <= hi; w++) {
+          grid[w][col] = '|';
+        }
+        grid[target][col] = 'X';
+        grid[c1][col] = '●';
+        grid[c2][col] = '○';
       }
-      grid[target][col] = 'X';
-      grid[c1][col] = '1';
-      grid[c2][col] = '0';
     });
     return grid.map((row, i) => `q${i}: ${row.join('')}`).join('\n');
   };
@@ -494,22 +510,24 @@ export default function WireShufflerPage() {
         collision_density: 0,
       };
     }
-    const degrees = new Array(width).fill(0);
-    gates.forEach(([t, c1, c2]) => {
-      [t, c1, c2].forEach((w) => {
-        degrees[w] += 1;
+    // Determine actual circuit width from gate indices (may include aux wire)
+    const maxWire = gates.reduce((max, gate) => Math.max(max, ...gate), 0);
+    const actualWidth = Math.max(width, maxWire + 1);
+    const degrees = new Array(actualWidth).fill(0);
+    gates.forEach((gate) => {
+      gate.forEach((w) => {
+        if (w !== undefined && w < actualWidth) degrees[w] += 1;
       });
     });
     const wires_used = degrees.filter((d) => d > 0).length;
-    const wire_coverage = width > 0 ? wires_used / width : 0;
+    const wire_coverage = actualWidth > 0 ? wires_used / actualWidth : 0;
     const max_wire_degree = Math.max(...degrees);
     const avg_wire_degree =
-      width > 0 ? degrees.reduce((a, b) => a + b, 0) / width : 0;
+      actualWidth > 0 ? degrees.reduce((a, b) => a + b, 0) / actualWidth : 0;
 
     const gatesCollide = (g1: number[], g2: number[]) => {
-      const [t1, c1_1, c2_1] = g1;
-      const [t2, c1_2, c2_2] = g2;
-      return t1 === c1_2 || t1 === c2_2 || t2 === c1_1 || t2 === c2_1;
+      // Check if any wire in g1 appears in g2
+      return g1.some((w) => g2.includes(w));
     };
 
     let adjacent_collisions = 0;

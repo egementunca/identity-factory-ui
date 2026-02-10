@@ -752,14 +752,15 @@ export default function PlaygroundPro() {
   // Rotate: shift all gate steps circularly by n
   const handleRotate = useCallback(
     (n: number) => {
-      if (circuit.gates.length === 0) return;
       setCircuit((prev) => {
-        // Use actual max step to ensure proper wrapping even if circuit.length is stale
+        // Check inside callback to avoid stale closure
+        if (prev.gates.length === 0) return prev;
+        // Use actual gate extent (maxStep + 1) for proper cyclic rotation
+        // Don't use prev.length as it includes padding columns
         const maxStep = Math.max(...prev.gates.map((g) => g.step));
-        const len = Math.max(prev.length, maxStep + 1);
+        const len = maxStep + 1;
         return {
           ...prev,
-          length: len, // Ensure circuit length matches actual gate extent
           gates: prev.gates.map((g) => ({
             ...g,
             step: (((g.step + n) % len) + len) % len, // Handle negative rotation
@@ -772,16 +773,18 @@ export default function PlaygroundPro() {
 
   // Reverse: reverse gate order
   const handleReverse = useCallback(() => {
-    if (circuit.gates.length === 0) return;
-    const maxStep = Math.max(...circuit.gates.map((g) => g.step));
-    setCircuit((prev) => ({
-      ...prev,
-      gates: prev.gates.map((g) => ({
-        ...g,
-        step: maxStep - g.step,
-      })),
-    }));
-  }, [circuit.gates, setCircuit]);
+    setCircuit((prev) => {
+      if (prev.gates.length === 0) return prev;
+      const maxStep = Math.max(...prev.gates.map((g) => g.step));
+      return {
+        ...prev,
+        gates: prev.gates.map((g) => ({
+          ...g,
+          step: maxStep - g.step,
+        })),
+      };
+    });
+  }, [setCircuit]);
 
   // Permute wires: relabel all wire indices according to a permutation
   const handlePermuteWires = useCallback(

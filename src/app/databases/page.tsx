@@ -5,9 +5,10 @@ import Navigation from '@/components/Navigation';
 import CircuitsDatabaseView from '@/components/database/CircuitsDatabaseView';
 import DualDatabaseView from '@/components/database/DualDatabaseView';
 import ClusterDatabaseView from '@/components/database/ClusterDatabaseView';
-import { Cpu, FileCode, Layers } from 'lucide-react';
+import ImportedIdentitiesView from '@/components/database/ImportedIdentitiesView';
+import { Cpu, FileCode, Layers, Upload } from 'lucide-react';
 
-type DatabaseTab = 'lmdb' | 'sqlite' | 'cluster';
+type DatabaseTab = 'lmdb' | 'sqlite' | 'cluster' | 'imported';
 
 interface TabInfo {
   id: DatabaseTab;
@@ -34,6 +35,12 @@ const tabs: TabInfo[] = [
     label: 'Cluster SAT',
     icon: <Layers size={18} />,
     description: '46K+ identity circuits from cluster enumeration',
+  },
+  {
+    id: 'imported',
+    label: 'Imported Identities',
+    icon: <Upload size={18} />,
+    description: 'Large identity circuits from external sources (16w, 128w)',
   },
 ];
 
@@ -116,6 +123,22 @@ export default function DatabasesPage() {
                 </p>
               </div>
               <ClusterDatabaseView />
+            </section>
+          )}
+
+          {activeTab === 'imported' && (
+            <section>
+              <div className="mb-4">
+                <h2 className="text-lg font-semibold text-white mb-1">
+                  Imported Identity Circuits
+                </h2>
+                <p className="text-sm text-slate-400">
+                  Large identity circuits from external sources including 16-wire
+                  and 128-wire circuits created from smaller base identities using
+                  wire shuffling techniques (Knuth shuffles, Waksman networks).
+                </p>
+              </div>
+              <ImportedIdentitiesView />
             </section>
           )}
         </div>
