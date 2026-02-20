@@ -10,6 +10,7 @@ interface StatusBarProps {
   selectedCount: number;
   clipboardCount: number;
   cycleNotation: string;
+  selectionCycleNotation?: string;
   // Performance flags
   isTooManyWires?: boolean;
   isTooManyGates?: boolean;
@@ -22,10 +23,13 @@ export default function StatusBar({
   selectedCount,
   clipboardCount,
   cycleNotation,
+  selectionCycleNotation,
   isTooManyWires = false,
   isTooManyGates = false,
 }: StatusBarProps) {
   const hasPerformanceWarning = isTooManyWires || isTooManyGates;
+  const effectiveCycle = selectionCycleNotation || cycleNotation;
+  const cycleLabel = selectionCycleNotation ? 'σ_sel:' : 'σ:';
   
   return (
     <div
@@ -75,14 +79,21 @@ export default function StatusBar({
 
       {/* Right section - cycle notation */}
       <div className="flex items-center gap-2 text-[var(--text-secondary)] truncate max-w-[40%]">
-        <span className="text-[var(--text-muted)]">σ:</span>
-        <span className="truncate" title={cycleNotation}>
-          {cycleNotation.length > 40
-            ? cycleNotation.slice(0, 40) + '…'
-            : cycleNotation}
+        <span
+          className={
+            selectionCycleNotation
+              ? 'text-[var(--accent-primary)]'
+              : 'text-[var(--text-muted)]'
+          }
+        >
+          {cycleLabel}
+        </span>
+        <span className="truncate" title={effectiveCycle}>
+          {effectiveCycle.length > 40
+            ? effectiveCycle.slice(0, 40) + '…'
+            : effectiveCycle}
         </span>
       </div>
     </div>
   );
 }
-

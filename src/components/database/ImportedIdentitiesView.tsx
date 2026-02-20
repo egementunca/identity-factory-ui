@@ -11,8 +11,9 @@ import {
   Cell,
 } from 'recharts';
 import { RefreshCw, Filter, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { API_V1_BASE } from '@/lib/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8000';
+const API_BASE = API_V1_BASE;
 
 interface WireStats {
   wires: number;
@@ -77,7 +78,7 @@ export default function ImportedIdentitiesView() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/imported-identities/stats`);
+      const res = await fetch(`${API_BASE}/imported-identities/stats`);
       if (!res.ok) {
         if (res.status === 404) {
           throw new Error('No imported identities database found. Run the import script first.');
@@ -101,7 +102,7 @@ export default function ImportedIdentitiesView() {
       if (minGates !== null) params.append('min_gates', minGates.toString());
       if (maxGates !== null) params.append('max_gates', maxGates.toString());
 
-      const res = await fetch(`${API_BASE}/api/v1/imported-identities/circuits?${params}`);
+      const res = await fetch(`${API_BASE}/imported-identities/circuits?${params}`);
       if (!res.ok) throw new Error('Failed to fetch circuits');
       const data = await res.json();
       setCircuits(data);

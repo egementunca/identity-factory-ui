@@ -2,17 +2,38 @@
  * API client for Identity Circuit Factory
  */
 
-// Use environment variable with fallback for local development
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
+// Normalize base URLs so we can safely use them across the UI.
+const baseEnv = process.env.NEXT_PUBLIC_API_BASE_URL;
+const hostEnv = process.env.NEXT_PUBLIC_API_HOST;
 
-// Base URL without /api/v1 suffix for SSE endpoints
-export const API_HOST = process.env.NEXT_PUBLIC_API_HOST || 'http://localhost:8000';
+const normalizeHost = (value?: string) => {
+  if (!value) return '';
+  return value.replace(/\/+$/, '');
+};
+
+const normalizeBase = (value?: string, hostFallback?: string) => {
+  const base = normalizeHost(value) || normalizeHost(hostFallback);
+  if (!base) return '';
+  return base.endsWith('/api/v1') ? base : `${base}/api/v1`;
+};
+
+// Base URL without /api/v1 suffix (useful for absolute links or custom URLs)
+export const API_HOST =
+  normalizeHost(hostEnv) ||
+  normalizeHost(baseEnv?.replace(/\/api\/v1\/?$/, '')) ||
+  'http://localhost:8000';
+
+// Base URL with /api/v1 (used for REST endpoints)
+export const API_V1_BASE = normalizeBase(baseEnv, API_HOST);
+
+// Backward-compatible alias
+export const API_BASE = API_V1_BASE;
 
 /**
  * Base fetch wrapper with consistent error handling
  */
 async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${endpoint}`, {
+  const res = await fetch(`${API_V1_BASE}${endpoint}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -82,6 +103,22 @@ export interface FactoryStats {
   database_size_mb?: number;
 }
 
+export interface DbRecord {
+  path: string;
+  exists: boolean;
+  type: string;
+  size_mb?: number;
+  tables?: Record<string, number>;
+  table_count?: number;
+  files?: string[];
+  note?: string;
+}
+
+export interface DbStatusResponse {
+  generated_at: string;
+  databases: Record<string, DbRecord>;
+}
+
 // Helper aliases
 export const getDimensionGroups = listDimGroups;
 
@@ -135,6 +172,10 @@ export function listDimGroups(): Promise<DimGroup[]> {
 
 export function getHealth(): Promise<{ status: string }> {
   return apiFetch('/health');
+}
+
+export function getDbStatus(): Promise<DbStatusResponse> {
+  return apiFetch('/db-status');
 }
 
 // ===== ECA57 LMDB API =====

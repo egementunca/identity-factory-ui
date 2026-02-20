@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import SkeletonGraph from '../SkeletonGraph';
 import { PlaygroundCircuit, PlaygroundGate, DatabaseSearchResult, DatabaseSearchResponse, DatabaseSource } from '@/types/api';
-import { API_HOST } from '@/lib/api';
+import { API_V1_BASE } from '@/lib/api';
 
 type PanelTab = 'skeleton' | 'database' | 'analysis';
 
@@ -32,6 +32,17 @@ interface RightPanelProps {
   isIdentity: boolean;
   permutation: number[];
   selectedGateIds?: Set<string>;
+  selectionInfo?: {
+    gateCount: number;
+    wireCount: number;
+    minStep: number;
+    maxStep: number;
+    stepSpan: number;
+    isIdentity: boolean;
+    cycleNotation: string;
+    skipped: boolean;
+    samplesTested: number;
+  };
   // Performance flags
   isTooManyGates?: boolean;
   isTooManyWires?: boolean;
@@ -51,6 +62,7 @@ export default function RightPanel({
   isIdentity,
   permutation,
   selectedGateIds,
+  selectionInfo,
   isTooManyGates = false,
   isTooManyWires = false,
   onLoadCircuit,
@@ -63,7 +75,7 @@ export default function RightPanel({
   const [selectedSources, setSelectedSources] = useState<DatabaseSource[]>(['skeleton', 'eca57-lmdb', 'sqlite']);
   const [loadingCircuitId, setLoadingCircuitId] = useState<string | null>(null);
 
-  const API_BASE = API_HOST;
+  const API_BASE = API_V1_BASE;
 
   // Resizable panel state
   const [panelWidth, setPanelWidth] = useState(320);
@@ -93,7 +105,7 @@ export default function RightPanel({
         selectedSources.forEach(s => params.append('sources', s));
       }
 
-      const res = await fetch(`${API_BASE}/api/v1/search/circuits?${params}`);
+      const res = await fetch(`${API_BASE}/search/circuits?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: DatabaseSearchResponse = await res.json();
       setSearchResults(data.results);
@@ -125,7 +137,7 @@ export default function RightPanel({
       });
       selectedSources.forEach(s => params.append('sources', s));
 
-      const res = await fetch(`${API_BASE}/api/v1/search/circuits?${params}`);
+      const res = await fetch(`${API_BASE}/search/circuits?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: DatabaseSearchResponse = await res.json();
       setSearchResults(data.results);
@@ -148,7 +160,7 @@ export default function RightPanel({
       });
       params.append('sources', 'sqlite');
 
-      const res = await fetch(`${API_BASE}/api/v1/search/circuits?${params}`);
+      const res = await fetch(`${API_BASE}/search/circuits?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: DatabaseSearchResponse = await res.json();
       setSearchResults(data.results);
@@ -452,6 +464,40 @@ export default function RightPanel({
                 {isIdentity ? '✓ Identity Circuit' : 'Non-Identity'}
               </div>
             </div>
+
+            {/* Selected Subcircuit */}
+            {selectionInfo && (
+              <div className="p-2 rounded bg-[var(--bg-tertiary)] border border-[var(--border-subtle)]">
+                <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1">
+                  Selected Subcircuit
+                </div>
+                <div className="text-[10px] text-[var(--text-muted)] mb-1">
+                  {selectionInfo.gateCount}g | {selectionInfo.wireCount}w | steps {selectionInfo.minStep}-{selectionInfo.maxStep}
+                </div>
+                <div
+                  className={`text-[10px] mb-1 ${
+                    selectionInfo.isIdentity
+                      ? 'text-[var(--status-identity)]'
+                      : 'text-[var(--text-secondary)]'
+                  }`}
+                >
+                  {selectionInfo.isIdentity
+                    ? '✓ Identity selection'
+                    : 'Non-identity selection'}
+                </div>
+                <div
+                  className="text-xs font-mono text-[var(--text-primary)] break-all"
+                  style={{ fontFamily: 'var(--font-mono)' }}
+                >
+                  {selectionInfo.cycleNotation || '()'}
+                </div>
+                {selectionInfo.skipped && (
+                  <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+                    Sampled {selectionInfo.samplesTested} inputs
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Cycle Notation */}
             <div className="p-2 rounded bg-[var(--bg-tertiary)] border border-[var(--border-subtle)]">

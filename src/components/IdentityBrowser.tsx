@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { FolderOpen, FileText, Download, X, RefreshCw, Clock, Layers, Cpu, Folder } from 'lucide-react';
-import { API_HOST } from '@/lib/api';
+import { API_V1_BASE } from '@/lib/api';
 
 interface IdentityFile {
   filename: string;
@@ -20,7 +20,7 @@ interface IdentityBrowserProps {
   onClose: () => void;
 }
 
-const API_BASE = API_HOST;
+const API_BASE = API_V1_BASE;
 
 export default function IdentityBrowser({ onLoadCircuit, isOpen, onClose }: IdentityBrowserProps) {
   const [identities, setIdentities] = useState<IdentityFile[]>([]);
@@ -33,7 +33,7 @@ export default function IdentityBrowser({ onLoadCircuit, isOpen, onClose }: Iden
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/local-mixing/identities/saved`);
+      const res = await fetch(`${API_BASE}/local-mixing/identities/saved`);
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
@@ -56,7 +56,7 @@ export default function IdentityBrowser({ onLoadCircuit, isOpen, onClose }: Iden
     setLoadingCircuit(true);
     setSelectedFile(relativePath);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/local-mixing/identities/saved/${relativePath}`);
+      const res = await fetch(`${API_BASE}/local-mixing/identities/saved/${relativePath}`);
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }

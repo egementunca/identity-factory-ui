@@ -11,19 +11,21 @@ import {
   Trash2
 } from 'lucide-react';
 import { ExperimentHistoryItem, ExperimentConfig, ExperimentResults } from '@/types/experiments';
-import { API_HOST } from '@/lib/api';
+import { API_V1_BASE } from '@/lib/api';
 
-const API_BASE = API_HOST;
+const API_BASE = API_V1_BASE;
 
 interface ExperimentHistoryProps {
   onSelectExperiment: (results: ExperimentResults) => void;
   onLoadConfig: (config: ExperimentConfig) => void;
+  onFollowExperiment?: (jobId: string, config?: ExperimentConfig) => void;
   currentJobId?: string | null;
 }
 
 export default function ExperimentHistory({ 
   onSelectExperiment, 
   onLoadConfig,
+  onFollowExperiment,
   currentJobId 
 }: ExperimentHistoryProps) {
   const [history, setHistory] = useState<ExperimentHistoryItem[]>([]);
@@ -33,7 +35,7 @@ export default function ExperimentHistory({
   const fetchHistory = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/api/v1/experiments/history?limit=50`);
+      const res = await fetch(`${API_BASE}/experiments/history?limit=50`);
       if (!res.ok) throw new Error('Failed to load history');
       const data = await res.json();
       setHistory(data.history || []);
@@ -53,7 +55,7 @@ export default function ExperimentHistory({
 
   const handleView = async (jobId: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/experiments/${jobId}/results`);
+      const res = await fetch(`${API_BASE}/experiments/${jobId}/results`);
       if (!res.ok) throw new Error('Failed to load results');
       const data = await res.json();
       onSelectExperiment(data);
@@ -137,6 +139,16 @@ export default function ExperimentHistory({
                   >
                     <BarChart2 size={14} />
                     View
+                  </button>
+                )}
+                {(item.status === 'running' || item.status === 'pending') && (
+                  <button 
+                    className="action-btn primary"
+                    onClick={() => onFollowExperiment?.(item.job_id, item.config)}
+                    title="Follow Live Logs"
+                  >
+                    <ChevronRight size={14} />
+                    Follow
                   </button>
                 )}
               </div>

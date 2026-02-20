@@ -8,7 +8,7 @@ import SkeletonGraph from './SkeletonGraph';
 import IdentityBrowser from './IdentityBrowser';
 import { PlaygroundCircuit, PlaygroundGate } from '@/types/api';
 import { Plus, Minus, ArrowRightLeft, FolderOpen, Zap } from 'lucide-react';
-import { API_HOST } from '@/lib/api';
+import { API_V1_BASE } from '@/lib/api';
 import {
   getTopologicalOrder,
   parseGateString,
@@ -16,7 +16,7 @@ import {
   computeReducedGates,
 } from '@/lib/circuitUtils';
 
-const API_BASE = API_HOST;
+const API_BASE = API_V1_BASE;
 
 const INITIAL_WIDTH = 4;
 const INITIAL_LENGTH = 12;
@@ -602,10 +602,10 @@ export default function ECA57Playground() {
   const handleLoadLatestIdentity = useCallback(async () => {
     setIsLoadingIdentity(true);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/local-mixing/identities/latest`);
+      const res = await fetch(`${API_BASE}/local-mixing/identities/latest`);
       if (!res.ok) {
         // Fallback to listing and getting first
-        const listRes = await fetch(`${API_BASE}/api/v1/local-mixing/identities/saved`);
+        const listRes = await fetch(`${API_BASE}/local-mixing/identities/saved`);
         if (!listRes.ok) throw new Error('No identities available');
         const listData = await listRes.json();
         if (!listData.identities || listData.identities.length === 0) {
@@ -614,7 +614,7 @@ export default function ECA57Playground() {
         }
         // Load the first one
         const first = listData.identities[0];
-        const fileRes = await fetch(`${API_BASE}/api/v1/local-mixing/identities/saved/${first.filename}`);
+        const fileRes = await fetch(`${API_BASE}/local-mixing/identities/saved/${first.filename}`);
         if (!fileRes.ok) throw new Error('Failed to load identity');
         const fileData = await fileRes.json();
         handleLoadCircuit(fileData.circuit_str, fileData.wires || 8);

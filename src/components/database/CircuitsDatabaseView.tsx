@@ -8,13 +8,11 @@ interface Circuit {
   width: number;
   gate_count: number;
   gates: any[];
-  permutation_hash: string;
-  created_at: string;
+  circuit_hash?: string;
 }
 
 interface DatabaseStats {
   total_circuits: number;
-  by_width: Record<number, number>;
 }
 
 export default function CircuitsDatabaseView() {
@@ -22,7 +20,6 @@ export default function CircuitsDatabaseView() {
   const [stats, setStats] = useState<DatabaseStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedWidth, setSelectedWidth] = useState<number | null>(null);
 
   useEffect(() => {
     loadStats();
@@ -45,13 +42,13 @@ export default function CircuitsDatabaseView() {
     setLoading(true);
     try {
       const url = width
-        ? `${API_BASE}/circuits?width=${width}&limit=100`
-        : `${API_BASE}/circuits?limit=100`;
+        ? `${API_BASE}/circuits?width=${width}&page=1&size=100`
+        : `${API_BASE}/circuits?page=1&size=100`;
 
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
-        setCircuits(data.circuits || []);
+        setCircuits(data.items || []);
       } else {
         setError('Failed to load circuits');
       }
@@ -59,15 +56,6 @@ export default function CircuitsDatabaseView() {
       setError('API not reachable. Make sure the server is running.');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const filterByWidth = (width: number | null) => {
-    setSelectedWidth(width);
-    if (width) {
-      loadCircuits(width);
-    } else {
-      loadCircuits();
     }
   };
 
@@ -81,19 +69,6 @@ export default function CircuitsDatabaseView() {
               <span className="stat-badge">
                 <strong>{stats.total_circuits}</strong> Total Circuits
               </span>
-              {Object.entries(stats.by_width || {}).map(([w, count]) => (
-                <button
-                  key={w}
-                  className={`width-filter ${selectedWidth === Number(w) ? 'active' : ''}`}
-                  onClick={() =>
-                    filterByWidth(
-                      selectedWidth === Number(w) ? null : Number(w)
-                    )
-                  }
-                >
-                  {w}w: {count}
-                </button>
-              ))}
             </>
           )}
         </div>
@@ -117,7 +92,6 @@ export default function CircuitsDatabaseView() {
                 <th>Width</th>
                 <th>Gates</th>
                 <th>Hash</th>
-                <th>Created</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -128,9 +102,8 @@ export default function CircuitsDatabaseView() {
                   <td>{circuit.width}w</td>
                   <td>{circuit.gate_count}g</td>
                   <td className="hash">
-                    {circuit.permutation_hash?.slice(0, 8)}...
+                    {circuit.circuit_hash ? `${circuit.circuit_hash.slice(0, 8)}...` : '-'}
                   </td>
-                  <td>{new Date(circuit.created_at).toLocaleDateString()}</td>
                   <td>
                     <button
                       className="btn-view"

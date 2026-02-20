@@ -12,6 +12,7 @@ import {
   Zap,
   FlaskConical,
   Shuffle,
+  Activity,
 } from 'lucide-react';
 
 interface NavItem {
@@ -45,6 +46,12 @@ const navItems: NavItem[] = [
     href: '/databases',
     icon: <Database size={20} />,
     description: 'Explore All Circuits',
+  },
+  {
+    label: 'DB Status',
+    href: '/db-status',
+    icon: <Activity size={20} />,
+    description: 'Inventory & Health',
   },
   {
     label: 'Wire Shuffler',

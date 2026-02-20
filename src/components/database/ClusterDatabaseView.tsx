@@ -23,13 +23,6 @@ interface ClusterStats {
   status: string;
 }
 
-interface DimGroup {
-  id: number;
-  width: number;
-  gate_count: number;
-  circuit_count: number;
-  is_processed: boolean;
-}
 
 interface ClusterCircuit {
   id: number;
@@ -43,7 +36,6 @@ interface ClusterCircuit {
 
 export default function ClusterDatabaseView() {
   const [stats, setStats] = useState<ClusterStats | null>(null);
-  const [dimGroups, setDimGroups] = useState<DimGroup[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Query state
@@ -67,16 +59,8 @@ export default function ClusterDatabaseView() {
   const fetchStats = async () => {
     setLoading(true);
     try {
-      const [statsRes, dimRes] = await Promise.all([
-        fetch(`${API_BASE}/cluster-database/stats`),
-        fetch(`${API_BASE}/cluster-database/dim-groups`),
-      ]);
-
+      const statsRes = await fetch(`${API_BASE}/cluster-database/stats`);
       if (statsRes.ok) setStats(await statsRes.json());
-      if (dimRes.ok) {
-        const data = await dimRes.json();
-        setDimGroups(data.dim_groups || []);
-      }
     } catch (e) {
       console.error('Failed to fetch cluster data:', e);
     } finally {
@@ -123,21 +107,36 @@ export default function ClusterDatabaseView() {
   }, []);
 
   // Compute chart data
+  const dimEntries = useMemo(() => {
+    if (!stats?.by_dimension) return [];
+    return Object.entries(stats.by_dimension)
+      .map(([key, count]) => {
+        const match = key.match(/^(\\d+)w_(\\d+)g$/);
+        if (!match) return null;
+        return {
+          width: Number(match[1]),
+          gate_count: Number(match[2]),
+          circuit_count: count,
+        };
+      })
+      .filter((entry): entry is { width: number; gate_count: number; circuit_count: number } => Boolean(entry));
+  }, [stats]);
+
   const widthData = useMemo(() => {
     const grouped: Record<number, number> = {};
-    dimGroups.forEach((d) => {
+    dimEntries.forEach((d) => {
       grouped[d.width] = (grouped[d.width] || 0) + d.circuit_count;
     });
     return Object.entries(grouped)
       .map(([w, c]) => ({ width: Number(w), count: c }))
       .sort((a, b) => a.width - b.width);
-  }, [dimGroups]);
+  }, [dimEntries]);
 
   // Filter gate counts based on selected width (if any)
   const gateData = useMemo(() => {
     const filtered = selectedWidth !== null
-      ? dimGroups.filter(d => d.width === selectedWidth)
-      : dimGroups;
+      ? dimEntries.filter(d => d.width === selectedWidth)
+      : dimEntries;
 
     const grouped: Record<number, number> = {};
     filtered.forEach((d) => {
@@ -146,13 +145,13 @@ export default function ClusterDatabaseView() {
     return Object.entries(grouped)
       .map(([g, c]) => ({ gates: Number(g), count: c }))
       .sort((a, b) => a.gates - b.gates);
-  }, [dimGroups, selectedWidth]);
+  }, [dimEntries, selectedWidth]);
 
   // Filter widths based on selected gate count (if any)
   const filteredWidthData = useMemo(() => {
     const filtered = selectedGates !== null
-      ? dimGroups.filter(d => d.gate_count === selectedGates)
-      : dimGroups;
+      ? dimEntries.filter(d => d.gate_count === selectedGates)
+      : dimEntries;
 
     const grouped: Record<number, number> = {};
     filtered.forEach((d) => {
@@ -161,7 +160,7 @@ export default function ClusterDatabaseView() {
     return Object.entries(grouped)
       .map(([w, c]) => ({ width: Number(w), count: c }))
       .sort((a, b) => a.width - b.width);
-  }, [dimGroups, selectedGates]);
+  }, [dimEntries, selectedGates]);
 
   const maxWidthCount = Math.max(...widthData.map((d) => d.count), 1);
   const maxGateCount = Math.max(...gateData.map((d) => d.count), 1);
@@ -338,7 +337,7 @@ export default function ClusterDatabaseView() {
           <span className="stat-label">Total Circuits</span>
         </div>
         <div className="stat-card">
-          <span className="stat-value">{dimGroups.length}</span>
+          <span className="stat-value">{dimEntries.length}</span>
           <span className="stat-label">Dimensions</span>
         </div>
         <div className="stat-card">
@@ -412,11 +411,11 @@ export default function ClusterDatabaseView() {
           <Grid3X3 size={18} /> Dimension Heatmap (Width × Gates)
         </h3>
         <div className="heatmap">
-          {dimGroups.map((d) => {
+          {dimEntries.map((d) => {
             const intensity = Math.min(d.circuit_count / 10000, 1);
             return (
               <div
-                key={d.id}
+                key={`${d.width}-${d.gate_count}`}
                 className={`heatmap-cell ${selectedWidth === d.width && selectedGates === d.gate_count ? 'selected' : ''}`}
                 style={{
                   backgroundColor: `rgba(100, 255, 150, ${0.1 + intensity * 0.8})`,
@@ -456,7 +455,7 @@ export default function ClusterDatabaseView() {
                 setSelectedWidth(newWidth);
                 // Clear gate selection if it doesn't exist for this width
                 if (newWidth !== null && selectedGates !== null) {
-                  const validGates = dimGroups
+                  const validGates = dimEntries
                     .filter(d => d.width === newWidth)
                     .map(d => d.gate_count);
                   if (!validGates.includes(selectedGates)) {
@@ -479,7 +478,7 @@ export default function ClusterDatabaseView() {
                 setSelectedGates(newGates);
                 // Clear width selection if it doesn't exist for this gate count
                 if (newGates !== null && selectedWidth !== null) {
-                  const validWidths = dimGroups
+                  const validWidths = dimEntries
                     .filter(d => d.gate_count === newGates)
                     .map(d => d.width);
                   if (!validWidths.includes(selectedWidth)) {
@@ -547,14 +546,8 @@ export default function ClusterDatabaseView() {
         {(selectedWidth !== null || selectedGates !== null) && (
           <div className="selection-preview">
             {(() => {
-              // Find matching dim group
-              const match = dimGroups.find(
-                d =>
-                  (selectedWidth === null || d.width === selectedWidth) &&
-                  (selectedGates === null || d.gate_count === selectedGates)
-              );
               const exactMatch = selectedWidth !== null && selectedGates !== null
-                ? dimGroups.find(d => d.width === selectedWidth && d.gate_count === selectedGates)
+                ? dimEntries.find(d => d.width === selectedWidth && d.gate_count === selectedGates)
                 : null;
 
               if (selectedWidth !== null && selectedGates !== null) {
@@ -572,12 +565,12 @@ export default function ClusterDatabaseView() {
                   );
                 }
               } else if (selectedWidth !== null) {
-                const total = dimGroups
+                const total = dimEntries
                   .filter(d => d.width === selectedWidth)
                   .reduce((sum, d) => sum + d.circuit_count, 0);
                 return <span className="preview-partial">{selectedWidth} wires: {total.toLocaleString()} circuits total</span>;
               } else if (selectedGates !== null) {
-                const total = dimGroups
+                const total = dimEntries
                   .filter(d => d.gate_count === selectedGates)
                   .reduce((sum, d) => sum + d.circuit_count, 0);
                 return <span className="preview-partial">{selectedGates} gates: {total.toLocaleString()} circuits total</span>;

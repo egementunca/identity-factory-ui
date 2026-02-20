@@ -13,10 +13,10 @@ import StatusBar from './StatusBar';
 import CircuitCanvasV2 from './CircuitCanvasV2';
 import IdentityBrowser from '../IdentityBrowser';
 import { PlaygroundCircuit, PlaygroundGate } from '@/types/api';
-import { API_HOST } from '@/lib/api';
-import { getTopologicalOrder } from '@/lib/circuitUtils';
+import { API_V1_BASE } from '@/lib/api';
+import { getTopologicalOrder, computeReducedGates, computePermutation } from '@/lib/circuitUtils';
 
-const API_BASE = API_HOST;
+const API_BASE = API_V1_BASE;
 
 const INITIAL_WIDTH = 4;
 const INITIAL_LENGTH = 12;
@@ -238,6 +238,97 @@ export default function PlaygroundPro() {
       samplesTested: 0,
     };
   }, [circuit, isTooManyWires, applyCircuitToState]);
+
+  const selectionInfo = useMemo(() => {
+    if (!selectedGateIds || selectedGateIds.size === 0) return undefined;
+
+    const selectedGates = circuit.gates.filter((g) =>
+      selectedGateIds.has(g.id)
+    );
+    if (selectedGates.length === 0) return undefined;
+
+    const stepValues = selectedGates.map((g) => g.step);
+    const minStep = Math.min(...stepValues);
+    const maxStep = Math.max(...stepValues);
+    const stepSpan = maxStep - minStep + 1;
+
+    const { gates: reducedGates, width: reducedWidth } =
+      computeReducedGates(selectedGates);
+
+    if (reducedWidth === 0) {
+      return {
+        gateCount: selectedGates.length,
+        wireCount: 0,
+        minStep,
+        maxStep,
+        stepSpan,
+        isIdentity: true,
+        cycleNotation: '()',
+        skipped: false,
+        samplesTested: 0,
+      };
+    }
+
+    if (reducedWidth > MAX_WIRES_FOR_PERMUTATION) {
+      const numSamples = Math.min(
+        SAMPLE_SIZE_FOR_LARGE,
+        selectedGates.length * 10
+      );
+      let allIdentity = true;
+      let failedInput: number | null = null;
+      const numStates = 1 << reducedWidth;
+
+      for (let i = 0; i < numSamples && allIdentity; i++) {
+        const input = Math.floor(
+          Math.random() * Math.min(numStates, Number.MAX_SAFE_INTEGER)
+        );
+        const output = applyCircuitToState(input, reducedGates, reducedWidth);
+        if (input !== output) {
+          allIdentity = false;
+          failedInput = input;
+        }
+      }
+
+      return {
+        gateCount: selectedGates.length,
+        wireCount: reducedWidth,
+        minStep,
+        maxStep,
+        stepSpan,
+        isIdentity: allIdentity,
+        cycleNotation: allIdentity
+          ? `✓ [${numSamples} samples OK]`
+          : `✗ [Failed at input ${failedInput}]`,
+        skipped: true,
+        samplesTested: numSamples,
+      };
+    }
+
+    const { isIdentity: selIdentity, cycleNotation: selCycle } =
+      computePermutation({
+        width: reducedWidth,
+        length: stepSpan,
+        gates: reducedGates,
+      });
+
+    return {
+      gateCount: selectedGates.length,
+      wireCount: reducedWidth,
+      minStep,
+      maxStep,
+      stepSpan,
+      isIdentity: selIdentity,
+      cycleNotation: selCycle,
+      skipped: false,
+      samplesTested: 0,
+    };
+  }, [
+    selectedGateIds,
+    circuit.gates,
+    applyCircuitToState,
+    MAX_WIRES_FOR_PERMUTATION,
+    SAMPLE_SIZE_FOR_LARGE,
+  ]);
 
   // Tab management
   const handleTabNew = useCallback(() => {
@@ -626,9 +717,9 @@ export default function PlaygroundPro() {
   const handleLoadLatestIdentity = useCallback(async () => {
     setIsLoadingIdentity(true);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/local-mixing/identities/latest`);
+      const res = await fetch(`${API_BASE}/local-mixing/identities/latest`);
       if (!res.ok) {
-        const listRes = await fetch(`${API_BASE}/api/v1/local-mixing/identities/saved`);
+        const listRes = await fetch(`${API_BASE}/local-mixing/identities/saved`);
         if (!listRes.ok) throw new Error('No identities available');
         const listData = await listRes.json();
         if (!listData.identities || listData.identities.length === 0) {
@@ -636,7 +727,7 @@ export default function PlaygroundPro() {
           return;
         }
         const first = listData.identities[0];
-        const fileRes = await fetch(`${API_BASE}/api/v1/local-mixing/identities/saved/${first.filename}`);
+        const fileRes = await fetch(`${API_BASE}/local-mixing/identities/saved/${first.filename}`);
         if (!fileRes.ok) throw new Error('Failed to load identity');
         const fileData = await fileRes.json();
         handleLoadCircuit(fileData.circuit_str, fileData.wires || 8);
@@ -663,7 +754,7 @@ export default function PlaygroundPro() {
     setSkeletonError(undefined);
     try {
         // Start generation
-        const res = await fetch(`${API_BASE}/api/v1/generators/run`, {
+        const res = await fetch(`${API_BASE}/generators/run`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -689,18 +780,18 @@ export default function PlaygroundPro() {
         // Poll for completion
         const pollInterval = setInterval(async () => {
             try {
-                const statusRes = await fetch(`${API_BASE}/api/v1/generators/runs/${run_id}`);
+                const statusRes = await fetch(`${API_BASE}/generators/runs/${run_id}`);
                 const statusData = await statusRes.json();
                 
                 if (statusData.status === 'completed') {
                     clearInterval(pollInterval);
-                    const resultRes = await fetch(`${API_BASE}/api/v1/generators/runs/${run_id}/result`);
+                    const resultRes = await fetch(`${API_BASE}/generators/runs/${run_id}/result`);
                     const resultData = await resultRes.json();
                     
                     if (resultData.success && resultData.circuit_ids && resultData.circuit_ids.length > 0) {
                          const circuitId = resultData.circuit_ids[0];
                          // Fetch the circuit
-                         const circuitRes = await fetch(`${API_BASE}/api/v1/circuits/${circuitId}`);
+                         const circuitRes = await fetch(`${API_BASE}/circuits/${circuitId}`);
                          if (circuitRes.ok) {
                              const circuitData = await circuitRes.json();
                              // Convert gates
@@ -815,24 +906,6 @@ export default function PlaygroundPro() {
   }, [circuit.width, handlePermuteWires]);
 
   // Selection & clipboard
-  const computeReducedGates = useCallback((gates: PlaygroundGate[]) => {
-    if (gates.length === 0) return { gates: [], width: 0 };
-    const usedWires = new Set<number>();
-    gates.forEach((g) => {
-      usedWires.add(g.target);
-      g.controls.forEach((c) => usedWires.add(c));
-    });
-    const sortedWires = Array.from(usedWires).sort((a, b) => a - b);
-    const wireMap = new Map<number, number>();
-    sortedWires.forEach((wire, idx) => wireMap.set(wire, idx));
-    const reducedGates = gates.map((g) => ({
-      ...g,
-      target: wireMap.get(g.target)!,
-      controls: g.controls.map((c) => wireMap.get(c)!),
-    }));
-    return { gates: reducedGates, width: sortedWires.length };
-  }, []);
-
   const handleSelectAll = useCallback(() => {
     setSelectedGateIds(() => new Set(circuit.gates.map((g) => g.id)));
   }, [circuit.gates, setSelectedGateIds]);
@@ -1055,6 +1128,7 @@ export default function PlaygroundPro() {
             isIdentity={isIdentity}
             permutation={permutation}
             selectedGateIds={selectedGateIds}
+            selectionInfo={selectionInfo}
             isTooManyGates={isTooManyGates}
             isTooManyWires={isTooManyWires}
             onLoadCircuit={handleLoadCircuit}
@@ -1069,6 +1143,7 @@ export default function PlaygroundPro() {
           selectedCount={selectedGateIds.size}
           clipboardCount={clipboard?.gates.length || 0}
           cycleNotation={cycleNotation}
+          selectionCycleNotation={selectionInfo?.cycleNotation}
           isTooManyWires={isTooManyWires}
           isTooManyGates={isTooManyGates}
         />
