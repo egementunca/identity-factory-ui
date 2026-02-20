@@ -22,10 +22,16 @@ The Identity Factory UI is a Next.js 14 application for exploring identity circu
 - `setup.sh` - Local setup helper (creates `.env.local`).
 
 ## API integration notes
-- `src/lib/api.ts` hard-codes `API_BASE` as `http://localhost:8000/api/v1`.
-- `next.config.js` defines `NEXT_PUBLIC_API_BASE_URL` and a rewrite for `/api/v1/*`, but `src/lib/api.ts` does not use it.
-- Several components call `fetch('http://localhost:8000/...')` directly and do not use the shared API client.
-- The experiments page uses `NEXT_PUBLIC_API_URL` (not `NEXT_PUBLIC_API_BASE_URL`).
+- `src/lib/api.ts` normalizes `NEXT_PUBLIC_API_BASE_URL` and `NEXT_PUBLIC_API_HOST`.
+- All fetches now route through the same base (`/api/v1`) to avoid split configs.
+- For SSE (`EventSource`), use `API_V1_BASE` + `/experiments/.../stream` to match the API prefix.
+
+### Recommended env vars
+Use these to keep the UI and API consistent:
+- `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1`
+- `NEXT_PUBLIC_API_HOST=http://localhost:8000`
+
+See `docs/ENVIRONMENT.md` for the full path normalization notes.
 
 ## UI subsystems
 - Dashboard (overview + quick links + stats).
@@ -43,9 +49,6 @@ The Identity Factory UI is a Next.js 14 application for exploring identity circu
 ## Known integration gaps
 These are useful for cleanup/refactor planning:
 - `CircuitsDatabaseView` expects `permutation_hash` and `created_at` fields that are not present in the current API response.
-- `CircuitsDatabaseView` uses `limit` query param, but the API expects `page` and `size`.
-- `getDimensionGroupCircuits` uses a `details` query param that the API does not accept.
-- Mixed environment variables (`NEXT_PUBLIC_API_URL` vs `NEXT_PUBLIC_API_BASE_URL`).
+- Generator endpoints rely on SAT solver availability; if unavailable, UI actions will error until configured.
 
 See `identity-factory-ui/docs/ROUTES_AND_COMPONENTS.md` for the route/component map.
-

@@ -45,9 +45,10 @@ echo "✅ Dependencies installed successfully"
 if [ ! -f ".env.local" ]; then
     echo ""
     echo "🔧 Creating environment configuration..."
-    cat > .env.local << EOF
+cat > .env.local << EOF
 # Identity Circuit Factory Frontend Configuration
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
+NEXT_PUBLIC_API_HOST=http://localhost:8000
 EOF
     echo "✅ Created .env.local with default settings"
 else
