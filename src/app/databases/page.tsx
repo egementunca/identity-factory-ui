@@ -99,11 +99,11 @@ export default function DatabasesPage() {
             <section>
               <div className="mb-4">
                 <h2 className="text-lg font-semibold text-white mb-1">
-                  Enumerated Circuits (SQLite)
+                  Primary Circuits (SQLite)
                 </h2>
                 <p className="text-sm text-slate-400">
-                  Circuits generated via the Identity Factory API and stored in
-                  circuits.db. Contains canonically enumerated circuits.
+                  Circuits stored in the active SQLite database (see DB Status
+                  for the resolved path).
                 </p>
               </div>
               <CircuitsDatabaseView />

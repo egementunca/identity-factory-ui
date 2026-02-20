@@ -139,10 +139,10 @@ export default function Dashboard() {
               <FileCode size={24} />
               <div>
                 <h4 className="text-sm font-semibold text-slate-300 mb-0.5">
-                  Main DB
+                  Primary DB
                 </h4>
                 <p className="text-xs text-slate-500 font-mono">
-                  identity_circuits.db
+                  active SQLite (see DB Status)
                 </p>
               </div>
             </div>

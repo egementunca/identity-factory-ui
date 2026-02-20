@@ -20,9 +20,9 @@ import InfoTooltip from '@/components/InfoTooltip';
 import HeatmapViewer from '@/components/experiments/HeatmapViewer';
 import AlignmentViewer from '@/components/experiments/AlignmentViewer';
 import ExperimentHistory from '@/components/experiments/ExperimentHistory';
-import { API_HOST } from '@/lib/api';
+import { API_V1_BASE } from '@/lib/api';
 
-const API_BASE = API_HOST;
+const API_BASE = API_V1_BASE;
 
 import {
   ObfuscationParams,
@@ -137,12 +137,22 @@ export default function ExperimentsPage() {
   const [logLines, setLogLines] = useState<string[]>([]);
   const [results, setResults] = useState<ExperimentResults | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const isRac = config.obfuscation.strategy === 'rac';
+  const isRunning =
+    status === 'running' || status === 'starting' || status === 'pending';
+  const [racProgress, setRacProgress] = useState<{
+    progress_lines: string[];
+    latest_intermediate?: string | null;
+    progress_path?: string | null;
+    latest_intermediate_length?: number | null;
+    latest_intermediate_truncated?: boolean;
+  } | null>(null);
 
   const logRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/v1/experiments/presets`)
+    fetch(`${API_BASE}/experiments/presets`)
       .then((res) => res.json())
       .then((data) => setPresets(data.presets || []))
       .catch((err) => console.error('Failed to load presets:', err));
@@ -185,6 +195,46 @@ export default function ExperimentsPage() {
     }
   };
 
+  useEffect(() => {
+    if (!isRac || !jobId) {
+      setRacProgress(null);
+      return;
+    }
+
+    let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const fetchRacProgress = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/experiments/${jobId}/rac-progress?tail=120`
+        );
+        if (!res.ok) {
+          return;
+        }
+        const data = await res.json();
+        if (!cancelled) {
+          setRacProgress(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch RAC progress:', err);
+      }
+    };
+
+    fetchRacProgress();
+
+    if (isRunning) {
+      interval = setInterval(fetchRacProgress, 3000);
+    }
+
+    return () => {
+      cancelled = true;
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [isRac, jobId, isRunning]);
+
 
 
   const startExperiment = async () => {
@@ -193,9 +243,10 @@ export default function ExperimentsPage() {
     setResults(null);
     setProgress(0);
     setStatus('starting');
+    setRacProgress(null);
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/experiments/start`, {
+      const res = await fetch(`${API_BASE}/experiments/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ config }),
@@ -238,7 +289,7 @@ export default function ExperimentsPage() {
       eventSourceRef.current.close();
     }
 
-    const es = new EventSource(`${API_BASE}/api/v1/experiments/${id}/stream`);
+    const es = new EventSource(`${API_BASE}/experiments/${id}/stream`);
     eventSourceRef.current = es;
 
     es.onmessage = (event) => {
@@ -266,7 +317,7 @@ export default function ExperimentsPage() {
 
   const fetchResults = async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/experiments/${id}/results`);
+      const res = await fetch(`${API_BASE}/experiments/${id}/results`);
       if (res.ok) {
         const data = await res.json();
         setResults(data);
@@ -277,10 +328,45 @@ export default function ExperimentsPage() {
     }
   };
 
+  const loadJobLogs = async (id: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/experiments/${id}/logs?tail=500`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.lines)) {
+        setLogLines(data.lines);
+      }
+      if (data.status) {
+        setStatus(data.status);
+      }
+    } catch (err) {
+      console.error('Failed to fetch logs:', err);
+    }
+  };
+
+  const followExperiment = async (
+    id: string,
+    loadedConfig?: ExperimentConfig
+  ) => {
+    setJobId(id);
+    setResults(null);
+    setError(null);
+    setProgress(0);
+    setStatus('running');
+    setRacProgress(null);
+    setLogLines([]);
+    if (loadedConfig) {
+      setConfig(loadedConfig);
+      setSelectedPreset('');
+    }
+    await loadJobLogs(id);
+    connectToStream(id);
+  };
+
   const cancelExperiment = async () => {
     if (!jobId) return;
     try {
-      await fetch(`${API_BASE}/api/v1/experiments/${jobId}`, {
+      await fetch(`${API_BASE}/experiments/${jobId}`, {
         method: 'DELETE',
       });
       eventSourceRef.current?.close();
@@ -290,8 +376,6 @@ export default function ExperimentsPage() {
     }
   };
 
-  const isRunning =
-    status === 'running' || status === 'starting' || status === 'pending';
   const maxRenderableCells = 1_000_000;
 
   const heatmapCellCount =
@@ -348,6 +432,175 @@ export default function ExperimentsPage() {
         ? 'Alignment matrix too large to render in the browser.'
         : '';
 
+  const racProgressLines = racProgress?.progress_lines ?? [];
+  const latestRound = (() => {
+    for (let i = racProgressLines.length - 1; i >= 0; i -= 1) {
+      const match = racProgressLines[i].match(/===\s*Round\s*(\d+)\s*===/i);
+      if (match) {
+        return parseInt(match[1], 10);
+      }
+    }
+    return null;
+  })();
+  const latestRoundCircuit = (() => {
+    for (let i = racProgressLines.length - 1; i >= 0; i -= 1) {
+      const line = racProgressLines[i].trim();
+      if (!line || line.startsWith('===') || !line.includes(';')) {
+        continue;
+      }
+      return line;
+    }
+    return null;
+  })();
+  const maxGateStringLength = 8000;
+  const intermediateLength =
+    racProgress?.latest_intermediate?.length ??
+    racProgress?.latest_intermediate_length ??
+    null;
+  const intermediateTooLarge =
+    Boolean(racProgress?.latest_intermediate_truncated) ||
+    (intermediateLength !== null && intermediateLength > maxGateStringLength);
+  const canLoadIntermediate =
+    Boolean(racProgress?.latest_intermediate) && !intermediateTooLarge;
+  const canLoadRoundSnapshot =
+    Boolean(latestRoundCircuit) &&
+    (latestRoundCircuit?.length ?? 0) <= maxGateStringLength;
+  const formatProgressLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return '';
+    if (trimmed.includes(';') && trimmed.length > 160) {
+      return `[circuit snapshot length ${trimmed.length} chars]`;
+    }
+    if (trimmed.length > 240) {
+      return `${trimmed.slice(0, 240)}... (${trimmed.length} chars)`;
+    }
+    return trimmed;
+  };
+  const displayProgressLines = racProgressLines
+    .slice(-24)
+    .map(formatProgressLine)
+    .filter((line) => line.length > 0);
+
+  const racTelemetry = (() => {
+    const telemetry: {
+      wires?: number;
+      initialGates?: number;
+      currentRound?: number;
+      totalRounds?: number;
+      startingLen?: number;
+      racStart?: number;
+      replaceLen?: number;
+      compressedLen?: number;
+      compressionPass?: number;
+      compressionBefore?: number;
+      compressionAfter?: number;
+      compressionDelta?: number;
+      compressionStable?: number;
+      roundStats?: {
+        round: number;
+        totalAttempts: number;
+        alreadyCollidedPct: number;
+        shootPct: number;
+        madeLeftPct: number;
+        traverseLeftAvg: number;
+      };
+    } = {};
+
+    for (const rawLine of logLines) {
+      const line = rawLine.replace(/^\[[^\]]+\]\s*/, '').trim();
+      if (!line) continue;
+
+      const runningMatch = line.match(
+        /Running RAC on circuit with (\d+) wires,\s*(\d+) gates/i
+      );
+      if (runningMatch) {
+        telemetry.wires = parseInt(runningMatch[1], 10);
+        telemetry.initialGates = parseInt(runningMatch[2], 10);
+      }
+
+      const currentRoundMatch = line.match(/Current round:\s*(\d+)\/(\d+)/i);
+      if (currentRoundMatch) {
+        telemetry.currentRound = parseInt(currentRoundMatch[1], 10);
+        telemetry.totalRounds = parseInt(currentRoundMatch[2], 10);
+      }
+
+      const startingLenMatch = line.match(/Starting len:\s*(\d+)/i);
+      if (startingLenMatch) {
+        telemetry.startingLen = parseInt(startingLenMatch[1], 10);
+      }
+
+      const racStartMatch = line.match(/RAC start:\s*(\d+)\s*gates/i);
+      if (racStartMatch) {
+        telemetry.racStart = parseInt(racStartMatch[1], 10);
+      }
+
+      const replaceLenMatch = line.match(
+        /Finished replace_sequential_pairs, new length:\s*(\d+)/i
+      );
+      if (replaceLenMatch) {
+        telemetry.replaceLen = parseInt(replaceLenMatch[1], 10);
+      }
+
+      const compressedLenMatch = line.match(/Compressed len:\s*(\d+)/i);
+      if (compressedLenMatch) {
+        telemetry.compressedLen = parseInt(compressedLenMatch[1], 10);
+      }
+
+      const compressionStartMatch = line.match(
+        /Compression pass\s+(\d+):\s*before\s*(\d+)\s*gates\s*\(stable\s*(\d+)\/12\)/i
+      );
+      if (compressionStartMatch) {
+        telemetry.compressionPass = parseInt(compressionStartMatch[1], 10);
+        telemetry.compressionBefore = parseInt(compressionStartMatch[2], 10);
+        telemetry.compressionStable = parseInt(compressionStartMatch[3], 10);
+      }
+
+      const compressionDoneMatch = line.match(
+        /Compression pass\s+(\d+)\s+done:\s*after\s*(\d+)\s*gates\s*\(delta\s*([+-]?\d+)\),\s*stable\s*(\d+)\/12/i
+      );
+      if (compressionDoneMatch) {
+        telemetry.compressionPass = parseInt(compressionDoneMatch[1], 10);
+        telemetry.compressionAfter = parseInt(compressionDoneMatch[2], 10);
+        telemetry.compressionDelta = parseInt(compressionDoneMatch[3], 10);
+        telemetry.compressionStable = parseInt(compressionDoneMatch[4], 10);
+      }
+
+      const roundStatsMatch = line.match(
+        /Round\s+(\d+)\s+stats:\s*Total Attempts:\s*(\d+)\s*\|\s*Already-collided\s*([\d.]+)%\s*\|\s*Shoot\s*([\d.]+)%\s*\|\s*Made-left\s*([\d.]+)%\s*\|\s*Traverse-left avg\s*([\d.]+)/i
+      );
+      if (roundStatsMatch) {
+        telemetry.roundStats = {
+          round: parseInt(roundStatsMatch[1], 10),
+          totalAttempts: parseInt(roundStatsMatch[2], 10),
+          alreadyCollidedPct: parseFloat(roundStatsMatch[3]),
+          shootPct: parseFloat(roundStatsMatch[4]),
+          madeLeftPct: parseFloat(roundStatsMatch[5]),
+          traverseLeftAvg: parseFloat(roundStatsMatch[6]),
+        };
+      }
+    }
+
+    return telemetry;
+  })();
+
+  const hasRacTelemetry = Boolean(
+    racTelemetry.wires ||
+      racTelemetry.currentRound ||
+      racTelemetry.startingLen ||
+      racTelemetry.racStart ||
+      racTelemetry.replaceLen ||
+      racTelemetry.compressedLen ||
+      racTelemetry.compressionPass ||
+      racTelemetry.roundStats
+  );
+
+  const handleLoadGateString = (gateString: string) => {
+    const width = results?.config?.wires ?? config.wires;
+    window.location.href = `/playground-v2?gates=${encodeURIComponent(
+      gateString
+    )}&width=${width}`;
+  };
+
   return (
     <div className="page">
       <Navigation />
@@ -358,6 +611,7 @@ export default function ExperimentsPage() {
             <ExperimentHistory
               onSelectExperiment={handleSelectExperiment}
               onLoadConfig={handleLoadConfig}
+              onFollowExperiment={followExperiment}
               currentJobId={jobId}
             />
           </aside>
@@ -457,6 +711,26 @@ export default function ExperimentsPage() {
                   />
                 </FormField>
               </div>
+              {isRac && (
+                <div className="rac-note">
+                  <div className="rac-note-title">RAC Requirements</div>
+                  <div className="rac-note-body">
+                    RAC uses a fixed internal pipeline and ignores most settings below.
+                    Only Wires, Initial Gates, and Rounds are used.
+                  </div>
+                  <ul className="rac-note-list">
+                    <li>
+                      SQLite: <code>local_mixing/db/circuits.db</code>
+                    </li>
+                    <li>
+                      LMDB: <code>local_mixing/db/data.mdb</code> (ids_n*, ids_rev, ids_wit_prefilter, perm tables)
+                    </li>
+                  </ul>
+                  <div className="rac-note-body">
+                    Docs: <code>local_mixing/docs/RAC_MIXING_SCHEME.md</code>
+                  </div>
+                </div>
+              )}
               <div className="toggles">
                 {config.obfuscation.strategy === 'abbutterfly' && (
                   <label className="toggle">
@@ -476,278 +750,286 @@ export default function ExperimentsPage() {
             </div>
 
             {/* Intensity */}
-            <div className="form-section">
-              <h3>Intensity</h3>
-              <div className="form-row">
-                <FormField label="Shooting Count" field="shooting_count">
-                  <input
-                    type="number"
-                    min={0}
-                    value={config.obfuscation.shooting_count}
-                    onChange={(e) =>
-                      updateObf('shooting_count', parseInt(e.target.value))
-                    }
-                    disabled={isRunning}
-                  />
-                  <span className="hint">
-                    Recommended: 1k (fast), 10k (standard), 100k (thorough)
-                  </span>
-                </FormField>
-                <FormField
-                  label="Single Gates"
-                  field="single_gate_replacements"
-                >
-                  <input
-                    type="number"
-                    min={0}
-                    value={config.obfuscation.single_gate_replacements}
-                    onChange={(e) =>
-                      updateObf(
-                        'single_gate_replacements',
-                        parseInt(e.target.value)
-                      )
-                    }
-                    disabled={isRunning}
-                  />
-                </FormField>
+            {!isRac && (
+              <div className="form-section">
+                <h3>Intensity</h3>
+                <div className="form-row">
+                  <FormField label="Shooting Count" field="shooting_count">
+                    <input
+                      type="number"
+                      min={0}
+                      value={config.obfuscation.shooting_count}
+                      onChange={(e) =>
+                        updateObf('shooting_count', parseInt(e.target.value))
+                      }
+                      disabled={isRunning}
+                    />
+                    <span className="hint">
+                      Recommended: 1k (fast), 10k (standard), 100k (thorough)
+                    </span>
+                  </FormField>
+                  <FormField
+                    label="Single Gates"
+                    field="single_gate_replacements"
+                  >
+                    <input
+                      type="number"
+                      min={0}
+                      value={config.obfuscation.single_gate_replacements}
+                      onChange={(e) =>
+                        updateObf(
+                          'single_gate_replacements',
+                          parseInt(e.target.value)
+                        )
+                      }
+                      disabled={isRunning}
+                    />
+                  </FormField>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Structure */}
-            <div className="form-section">
-              <h3>Structure</h3>
-              <div className="form-row">
-                <FormField
-                  label="Block Size Min"
-                  field="structure_block_size_min"
-                >
-                  <input
-                    type="number"
-                    min={0}
-                    value={config.obfuscation.structure_block_size_min}
-                    onChange={(e) =>
-                      updateObf(
-                        'structure_block_size_min',
-                        parseInt(e.target.value)
-                      )
-                    }
-                    disabled={isRunning}
-                  />
-                </FormField>
-                <FormField
-                  label="Block Size Max"
-                  field="structure_block_size_max"
-                >
-                  <input
-                    type="number"
-                    min={0}
-                    value={config.obfuscation.structure_block_size_max}
-                    onChange={(e) =>
-                      updateObf(
-                        'structure_block_size_max',
-                        parseInt(e.target.value)
-                      )
-                    }
-                    disabled={isRunning}
-                  />
-                </FormField>
+            {!isRac && (
+              <div className="form-section">
+                <h3>Structure</h3>
+                <div className="form-row">
+                  <FormField
+                    label="Block Size Min"
+                    field="structure_block_size_min"
+                  >
+                    <input
+                      type="number"
+                      min={0}
+                      value={config.obfuscation.structure_block_size_min}
+                      onChange={(e) =>
+                        updateObf(
+                          'structure_block_size_min',
+                          parseInt(e.target.value)
+                        )
+                      }
+                      disabled={isRunning}
+                    />
+                  </FormField>
+                  <FormField
+                    label="Block Size Max"
+                    field="structure_block_size_max"
+                  >
+                    <input
+                      type="number"
+                      min={0}
+                      value={config.obfuscation.structure_block_size_max}
+                      onChange={(e) =>
+                        updateObf(
+                          'structure_block_size_max',
+                          parseInt(e.target.value)
+                        )
+                      }
+                      disabled={isRunning}
+                    />
+                  </FormField>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Optimization & Flags */}
-            <div className="form-section">
-              <h3>Optimization</h3>
-              <div className="toggles">
-                <label className="toggle">
-                  <input
-                    type="checkbox"
-                    checked={config.obfuscation.sat_mode}
-                    onChange={(e) => updateObf('sat_mode', e.target.checked)}
-                    disabled={isRunning}
-                  />
-                  <span>SAT Mode</span>
-                  <InfoTooltip content={paramDescriptions.sat_mode} />
-                </label>
-                <label className="toggle">
-                  <input
-                    type="checkbox"
-                    checked={config.obfuscation.skip_compression}
-                    onChange={(e) =>
-                      updateObf('skip_compression', e.target.checked)
-                    }
-                    disabled={isRunning}
-                  />
-                  <span>Inflation Only</span>
-                  <InfoTooltip content={paramDescriptions.skip_compression} />
-                </label>
-                <label className="toggle">
-                  <input
-                    type="checkbox"
-                    checked={config.obfuscation.no_ancilla_mode}
-                    onChange={(e) =>
-                      updateObf('no_ancilla_mode', e.target.checked)
-                    }
-                    disabled={isRunning}
-                  />
-                  <span>No Ancilla</span>
-                  <InfoTooltip content={paramDescriptions.no_ancilla_mode} />
-                </label>
-                <label className="toggle">
-                  <input
-                    type="checkbox"
-                    checked={config.obfuscation.single_gate_mode}
-                    onChange={(e) =>
-                      updateObf('single_gate_mode', e.target.checked)
-                    }
-                    disabled={isRunning}
-                  />
-                  <span>Single Gate Mode</span>
-                  <InfoTooltip content={paramDescriptions.single_gate_mode} />
-                </label>
-                <label className="toggle">
-                  <input
-                    type="checkbox"
-                    checked={config.obfuscation.pair_replacement_mode}
-                    onChange={(e) =>
-                      updateObf('pair_replacement_mode', e.target.checked)
-                    }
-                    disabled={isRunning}
-                  />
-                  <span>Pair Replacement</span>
-                  <InfoTooltip content={paramDescriptions.pair_replacement_mode} />
-                </label>
+            {!isRac && (
+              <div className="form-section">
+                <h3>Optimization</h3>
+                <div className="toggles">
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={config.obfuscation.sat_mode}
+                      onChange={(e) => updateObf('sat_mode', e.target.checked)}
+                      disabled={isRunning}
+                    />
+                    <span>SAT Mode</span>
+                    <InfoTooltip content={paramDescriptions.sat_mode} />
+                  </label>
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={config.obfuscation.skip_compression}
+                      onChange={(e) =>
+                        updateObf('skip_compression', e.target.checked)
+                      }
+                      disabled={isRunning}
+                    />
+                    <span>Inflation Only</span>
+                    <InfoTooltip content={paramDescriptions.skip_compression} />
+                  </label>
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={config.obfuscation.no_ancilla_mode}
+                      onChange={(e) =>
+                        updateObf('no_ancilla_mode', e.target.checked)
+                      }
+                      disabled={isRunning}
+                    />
+                    <span>No Ancilla</span>
+                    <InfoTooltip content={paramDescriptions.no_ancilla_mode} />
+                  </label>
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={config.obfuscation.single_gate_mode}
+                      onChange={(e) =>
+                        updateObf('single_gate_mode', e.target.checked)
+                      }
+                      disabled={isRunning}
+                    />
+                    <span>Single Gate Mode</span>
+                    <InfoTooltip content={paramDescriptions.single_gate_mode} />
+                  </label>
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={config.obfuscation.pair_replacement_mode}
+                      onChange={(e) =>
+                        updateObf('pair_replacement_mode', e.target.checked)
+                      }
+                      disabled={isRunning}
+                    />
+                    <span>Pair Replacement</span>
+                    <InfoTooltip content={paramDescriptions.pair_replacement_mode} />
+                  </label>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Advanced Settings (collapsible) */}
-            <div className="form-section">
-              <button
-                className="advanced-toggle"
-                onClick={() => setShowAdvanced(!showAdvanced)}
-              >
-                {showAdvanced ? (
-                  <ChevronUp size={16} />
-                ) : (
-                  <ChevronDown size={16} />
-                )}
-                Advanced Settings
-              </button>
+            {!isRac && (
+              <div className="form-section">
+                <button
+                  className="advanced-toggle"
+                  onClick={() => setShowAdvanced(!showAdvanced)}
+                >
+                  {showAdvanced ? (
+                    <ChevronUp size={16} />
+                  ) : (
+                    <ChevronDown size={16} />
+                  )}
+                  Advanced Settings
+                </button>
 
-              {showAdvanced && (
-                  <div className="advanced-fields">
-                  <div className="form-row">
-                    <FormField
-                      label="Shooting Inner"
-                      field="shooting_count_inner"
-                    >
-                      <input
-                        type="number"
-                        min={0}
-                        value={config.obfuscation.shooting_count_inner}
-                        onChange={(e) =>
-                          updateObf(
-                            'shooting_count_inner',
-                            parseInt(e.target.value)
-                          )
-                        }
-                        disabled={isRunning}
-                      />
-                    </FormField>
+                {showAdvanced && (
+                    <div className="advanced-fields">
+                    <div className="form-row">
+                      <FormField
+                        label="Shooting Inner"
+                        field="shooting_count_inner"
+                      >
+                        <input
+                          type="number"
+                          min={0}
+                          value={config.obfuscation.shooting_count_inner}
+                          onChange={(e) =>
+                            updateObf(
+                              'shooting_count_inner',
+                              parseInt(e.target.value)
+                            )
+                          }
+                          disabled={isRunning}
+                        />
+                      </FormField>
+                    </div>
+                    <div className="form-row">
+                      <FormField
+                        label="Compression Window"
+                        field="compression_window_size"
+                      >
+                        <input
+                          type="number"
+                          min={10}
+                          value={config.obfuscation.compression_window_size}
+                          onChange={(e) =>
+                            updateObf(
+                              'compression_window_size',
+                              parseInt(e.target.value)
+                            )
+                          }
+                          disabled={isRunning}
+                        />
+                      </FormField>
+                      <FormField
+                        label="SAT Window"
+                        field="compression_window_size_sat"
+                      >
+                        <input
+                          type="number"
+                          min={1}
+                          value={config.obfuscation.compression_window_size_sat}
+                          onChange={(e) =>
+                            updateObf(
+                              'compression_window_size_sat',
+                              parseInt(e.target.value)
+                            )
+                          }
+                          disabled={isRunning}
+                        />
+                      </FormField>
+                    </div>
+                    <div className="form-row">
+                      <FormField
+                        label="SAT Conflict Limit"
+                        field="compression_sat_limit"
+                      >
+                        <input
+                          type="number"
+                          min={100}
+                          value={config.obfuscation.compression_sat_limit}
+                          onChange={(e) =>
+                            updateObf(
+                              'compression_sat_limit',
+                              parseInt(e.target.value)
+                            )
+                          }
+                          disabled={isRunning}
+                        />
+                      </FormField>
+                      <FormField
+                        label="Stability Threshold"
+                        field="final_stability_threshold"
+                      >
+                        <input
+                          type="number"
+                          min={1}
+                          value={config.obfuscation.final_stability_threshold}
+                          onChange={(e) =>
+                            updateObf(
+                              'final_stability_threshold',
+                              parseInt(e.target.value)
+                            )
+                          }
+                          disabled={isRunning}
+                        />
+                      </FormField>
+                    </div>
+                    <div className="form-row">
+                      <FormField
+                        label="Chunk Split Base"
+                        field="chunk_split_base"
+                      >
+                        <input
+                          type="number"
+                          min={100}
+                          value={config.obfuscation.chunk_split_base}
+                          onChange={(e) =>
+                            updateObf(
+                              'chunk_split_base',
+                              parseInt(e.target.value)
+                            )
+                          }
+                          disabled={isRunning}
+                        />
+                      </FormField>
+                    </div>
                   </div>
-                  <div className="form-row">
-                    <FormField
-                      label="Compression Window"
-                      field="compression_window_size"
-                    >
-                      <input
-                        type="number"
-                        min={10}
-                        value={config.obfuscation.compression_window_size}
-                        onChange={(e) =>
-                          updateObf(
-                            'compression_window_size',
-                            parseInt(e.target.value)
-                          )
-                        }
-                        disabled={isRunning}
-                      />
-                    </FormField>
-                    <FormField
-                      label="SAT Window"
-                      field="compression_window_size_sat"
-                    >
-                      <input
-                        type="number"
-                        min={1}
-                        value={config.obfuscation.compression_window_size_sat}
-                        onChange={(e) =>
-                          updateObf(
-                            'compression_window_size_sat',
-                            parseInt(e.target.value)
-                          )
-                        }
-                        disabled={isRunning}
-                      />
-                    </FormField>
-                  </div>
-                  <div className="form-row">
-                    <FormField
-                      label="SAT Conflict Limit"
-                      field="compression_sat_limit"
-                    >
-                      <input
-                        type="number"
-                        min={100}
-                        value={config.obfuscation.compression_sat_limit}
-                        onChange={(e) =>
-                          updateObf(
-                            'compression_sat_limit',
-                            parseInt(e.target.value)
-                          )
-                        }
-                        disabled={isRunning}
-                      />
-                    </FormField>
-                    <FormField
-                      label="Stability Threshold"
-                      field="final_stability_threshold"
-                    >
-                      <input
-                        type="number"
-                        min={1}
-                        value={config.obfuscation.final_stability_threshold}
-                        onChange={(e) =>
-                          updateObf(
-                            'final_stability_threshold',
-                            parseInt(e.target.value)
-                          )
-                        }
-                        disabled={isRunning}
-                      />
-                    </FormField>
-                  </div>
-                  <div className="form-row">
-                    <FormField
-                      label="Chunk Split Base"
-                      field="chunk_split_base"
-                    >
-                      <input
-                        type="number"
-                        min={100}
-                        value={config.obfuscation.chunk_split_base}
-                        onChange={(e) =>
-                          updateObf(
-                            'chunk_split_base',
-                            parseInt(e.target.value)
-                          )
-                        }
-                        disabled={isRunning}
-                      />
-                    </FormField>
-                  </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             {/* Run Button */}
             <div className="actions">
@@ -804,6 +1086,148 @@ export default function ExperimentsPage() {
                 ))
               )}
             </div>
+
+            {isRac && jobId && (
+              <div className="rac-progress">
+                <div className="rac-progress-header">
+                  <div className="rac-progress-title">RAC Progress</div>
+                  <div className="rac-progress-round">
+                    {latestRound ? `Round ${latestRound}` : 'No rounds yet'}
+                  </div>
+                </div>
+                {racProgress?.progress_path && (
+                  <div className="rac-progress-path">
+                    Progress file: <code>{racProgress.progress_path}</code>
+                  </div>
+                )}
+                {hasRacTelemetry && (
+                  <div className="rac-telemetry">
+                    <div className="rac-telemetry-item">
+                      <span className="rac-telemetry-label">Current Round</span>
+                      <span className="rac-telemetry-value">
+                        {racTelemetry.currentRound ?? '—'}
+                        {racTelemetry.totalRounds
+                          ? `/${racTelemetry.totalRounds}`
+                          : ''}
+                      </span>
+                    </div>
+                    <div className="rac-telemetry-item">
+                      <span className="rac-telemetry-label">Wires</span>
+                      <span className="rac-telemetry-value">
+                        {racTelemetry.wires ?? config.wires}
+                      </span>
+                    </div>
+                    <div className="rac-telemetry-item">
+                      <span className="rac-telemetry-label">Start Len</span>
+                      <span className="rac-telemetry-value">
+                        {racTelemetry.startingLen ??
+                          racTelemetry.initialGates ??
+                          '—'}
+                      </span>
+                    </div>
+                    <div className="rac-telemetry-item">
+                      <span className="rac-telemetry-label">Post Replace</span>
+                      <span className="rac-telemetry-value">
+                        {racTelemetry.replaceLen ?? '—'}
+                      </span>
+                    </div>
+                    <div className="rac-telemetry-item">
+                      <span className="rac-telemetry-label">Compressed</span>
+                      <span className="rac-telemetry-value">
+                        {racTelemetry.compressedLen ?? '—'}
+                      </span>
+                    </div>
+                    {(racTelemetry.compressionPass ||
+                      racTelemetry.compressionBefore ||
+                      racTelemetry.compressionAfter) && (
+                      <div className="rac-telemetry-item wide">
+                        <span className="rac-telemetry-label">
+                          Compression Pass
+                        </span>
+                        <span className="rac-telemetry-value">
+                          Pass {racTelemetry.compressionPass ?? '—'} · before{' '}
+                          {racTelemetry.compressionBefore ?? '—'} → after{' '}
+                          {racTelemetry.compressionAfter ?? '—'} (Δ{' '}
+                          {racTelemetry.compressionDelta ?? '—'}) · stable{' '}
+                          {racTelemetry.compressionStable ?? '—'}/12
+                        </span>
+                      </div>
+                    )}
+                    {racTelemetry.roundStats && (
+                      <div className="rac-telemetry-item wide">
+                        <span className="rac-telemetry-label">
+                          Round {racTelemetry.roundStats.round} Stats
+                        </span>
+                        <span className="rac-telemetry-value">
+                          Attempts {racTelemetry.roundStats.totalAttempts} ·
+                          Collided {racTelemetry.roundStats.alreadyCollidedPct.toFixed(2)}% ·
+                          Shoot {racTelemetry.roundStats.shootPct.toFixed(2)}% ·
+                          Made-left {racTelemetry.roundStats.madeLeftPct.toFixed(2)}% ·
+                          Traverse {racTelemetry.roundStats.traverseLeftAvg.toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="rac-progress-actions">
+                  <button
+                    className="btn-secondary"
+                    onClick={() =>
+                      racProgress?.latest_intermediate &&
+                      handleLoadGateString(racProgress.latest_intermediate)
+                    }
+                    disabled={!canLoadIntermediate}
+                    title={
+                      canLoadIntermediate
+                        ? 'Load the latest pre-compression snapshot'
+                        : 'Intermediate snapshot too large to load via URL'
+                    }
+                  >
+                    Load Latest Intermediate
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    onClick={() =>
+                      latestRoundCircuit &&
+                      handleLoadGateString(latestRoundCircuit)
+                    }
+                    disabled={!canLoadRoundSnapshot}
+                    title={
+                      canLoadRoundSnapshot
+                        ? 'Load the latest post-compression round snapshot'
+                        : 'Round snapshot too large to load via URL'
+                    }
+                  >
+                    Load Latest Round Snapshot
+                  </button>
+                </div>
+                {intermediateTooLarge && (
+                  <div className="rac-progress-note">
+                    Intermediate snapshot too large for URL load (
+                    {intermediateLength ?? 'unknown'} chars). Use{' '}
+                    <code>local_mixing/progress/rac_intermediate.txt</code>.
+                  </div>
+                )}
+                {!canLoadRoundSnapshot && latestRoundCircuit && (
+                  <div className="rac-progress-note">
+                    Round snapshot too large for URL load (
+                    {latestRoundCircuit.length} chars). Use the progress file
+                    above.
+                  </div>
+                )}
+                <div className="rac-progress-log">
+                  {displayProgressLines.length === 0 ? (
+                    <div className="log-empty">No RAC progress yet.</div>
+                  ) : (
+                    displayProgressLines.map((line, i) => (
+                      <div key={i} className="log-line">
+                        {line}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
 
             {results && (
               <div className="results-summary">
@@ -979,6 +1403,32 @@ export default function ExperimentsPage() {
           color: rgba(200, 200, 220, 0.6);
           margin-top: 4px;
         }
+        .rac-note {
+          margin-top: 10px;
+          padding: 10px 12px;
+          background: rgba(30, 30, 45, 0.6);
+          border: 1px solid rgba(120, 140, 200, 0.25);
+          border-radius: 10px;
+        }
+        .rac-note-title {
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: rgba(200, 220, 255, 0.9);
+          margin-bottom: 4px;
+        }
+        .rac-note-body {
+          font-size: 0.72rem;
+          color: rgba(200, 200, 220, 0.75);
+        }
+        .rac-note-list {
+          margin: 6px 0 6px 18px;
+          padding: 0;
+          font-size: 0.72rem;
+          color: rgba(200, 200, 220, 0.75);
+        }
+        .rac-note-list li {
+          margin: 2px 0;
+        }
         .form-row {
           display: grid;
           grid-template-columns: 1fr 1fr;
@@ -1050,6 +1500,28 @@ export default function ExperimentsPage() {
         .btn-danger {
           background: linear-gradient(135deg, #ff4a4a, #cd5a5a);
           color: #fff;
+        }
+        .btn-secondary {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 10px 12px;
+          border: 1px solid rgba(120, 140, 200, 0.3);
+          border-radius: 8px;
+          background: rgba(30, 30, 45, 0.8);
+          color: rgba(220, 230, 255, 0.9);
+          font-size: 0.75rem;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+        .btn-secondary:hover {
+          border-color: rgba(120, 160, 255, 0.6);
+          color: #fff;
+        }
+        .btn-secondary:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
         }
         .error {
           margin-top: 16px;
@@ -1124,6 +1596,82 @@ export default function ExperimentsPage() {
           line-height: 1.6;
           white-space: pre-wrap;
           word-break: break-all;
+        }
+        .rac-progress {
+          margin-top: 16px;
+          padding: 12px;
+          background: rgba(18, 18, 28, 0.7);
+          border: 1px solid rgba(100, 120, 180, 0.25);
+          border-radius: 12px;
+        }
+        .rac-progress-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 8px;
+        }
+        .rac-progress-title {
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: rgba(210, 220, 255, 0.95);
+        }
+        .rac-progress-round {
+          font-size: 0.72rem;
+          color: rgba(200, 210, 240, 0.7);
+        }
+        .rac-progress-path {
+          font-size: 0.7rem;
+          color: rgba(200, 200, 220, 0.7);
+          margin-bottom: 8px;
+          word-break: break-all;
+        }
+        .rac-telemetry {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+          gap: 8px;
+          margin-bottom: 10px;
+        }
+        .rac-telemetry-item {
+          padding: 8px 10px;
+          background: rgba(24, 24, 36, 0.8);
+          border: 1px solid rgba(100, 120, 180, 0.2);
+          border-radius: 8px;
+        }
+        .rac-telemetry-item.wide {
+          grid-column: 1 / -1;
+        }
+        .rac-telemetry-label {
+          display: block;
+          font-size: 0.65rem;
+          color: rgba(190, 200, 230, 0.7);
+          margin-bottom: 4px;
+        }
+        .rac-telemetry-value {
+          display: block;
+          font-size: 0.78rem;
+          font-weight: 600;
+          color: rgba(230, 240, 255, 0.95);
+        }
+        .rac-progress-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-bottom: 8px;
+        }
+        .rac-progress-note {
+          font-size: 0.7rem;
+          color: rgba(240, 200, 120, 0.8);
+          margin-bottom: 8px;
+        }
+        .rac-progress-log {
+          height: 160px;
+          overflow-y: auto;
+          background: rgba(10, 10, 15, 0.75);
+          border: 1px solid rgba(100, 100, 150, 0.2);
+          border-radius: 8px;
+          padding: 10px;
+          font-family: 'SF Mono', 'Fira Code', monospace;
+          font-size: 0.72rem;
         }
         .results-summary {
           margin-top: 20px;
